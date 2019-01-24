@@ -84,6 +84,7 @@ jobs:
         searchFolder: '$(Build.SourcesDirectory)\csharp\test'
         runInParallel: true
         configuration: Debug
+        testFiltercriteria: 'FullyQualifiedName!=Microsoft.ML.OnnxRuntime.Tests.InferenceTest.TestModelInputFLOAT16|FullyQualifiedName!=Microsoft.ML.OnnxRuntime.Tests.InferenceTest.TestModelInputSTRING|FullyQualifiedName!=Microsoft.ML.OnnxRuntime.Tests.InferenceTest.TestModelInputBOOL|FullyQualifiedName!=Microsoft.ML.OnnxRuntime.Tests.InferenceTest.TestModelInputINT8'
 
     - task: VSBuild@1
       displayName: 'Build Release'
@@ -120,6 +121,7 @@ jobs:
         searchFolder: '$(Build.SourcesDirectory)\csharp\test'
         runInParallel: true
         configuration: Release
+        testFiltercriteria: 'FullyQualifiedName!=Microsoft.ML.OnnxRuntime.Tests.InferenceTest.TestModelInputFLOAT16|FullyQualifiedName!=Microsoft.ML.OnnxRuntime.Tests.InferenceTest.TestModelInputSTRING|FullyQualifiedName!=Microsoft.ML.OnnxRuntime.Tests.InferenceTest.TestModelInputBOOL|FullyQualifiedName!=Microsoft.ML.OnnxRuntime.Tests.InferenceTest.TestModelInputINT8'
 
     - task: PublishTestResults@2
       displayName: 'Publish unit test results'
