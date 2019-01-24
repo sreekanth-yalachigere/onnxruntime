@@ -81,9 +81,9 @@ jobs:
       displayName: 'VsTest - C# Debug'
       inputs:
         testAssemblyVer2: '**\Microsoft.ML.OnnxRuntime.Tests.dll'
-        searchFolder: '$(Build.SourcesDirectory)\csharp\bin\Debug'
+        searchFolder: '$(Build.SourcesDirectory)\'
         runInParallel: true
-        configuration: Release
+        configuration: Debug
 
     - task: VSBuild@1
       displayName: 'Build Release'
@@ -128,4 +128,4 @@ jobs:
         searchFolder: '$(Build.BinariesDirectory)'
         testRunTitle: 'Unit Test Run'
       condition: succeededOrFailed()
-    - template: templates/clean-agent-build-directory-step.yml
+
