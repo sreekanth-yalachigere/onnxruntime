@@ -61,7 +61,7 @@ class ConvPrimitive : public PrimitiveBase {
  public:
   explicit ConvPrimitive(const ConvParams& params)
       : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
+    //context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
     if (context_.conv_fwd == nullptr) {
       Initialize(params);
     }
@@ -81,7 +81,7 @@ class ConvPrimitive : public PrimitiveBase {
     }
     context_.dst_mem->set_data_handle(
         static_cast<void*>(dst_data));
-    context_.stream->submit(context_.net);
+    //context_.stream->submit(context_.net);
 
     context_.src_mem->set_data_handle(nullptr);
     context_.filter_mem->set_data_handle(nullptr);
@@ -92,11 +92,11 @@ class ConvPrimitive : public PrimitiveBase {
     return;
   }
 
-  mkldnn::memory::format GetSrcMemoryFormat() const { return context_.src_fmt; }
+  mkldnn::memory::format_tag GetSrcMemoryformat_tag() const { return context_.src_fmt; }
 
-  mkldnn::memory::format GetFilterMemoryFormat() const { return context_.filter_fmt; }
+  mkldnn::memory::format_tag GetFilterMemoryformat_tag() const { return context_.filter_fmt; }
 
-  mkldnn::memory::format GetDstMemoryFormat() const { return context_.dst_fmt; }
+  mkldnn::memory::format_tag GetDstMemoryformat_tag() const { return context_.dst_fmt; }
 
   size_t GetSrcSize() const { return context_.src_size; }
 
@@ -104,15 +104,15 @@ class ConvPrimitive : public PrimitiveBase {
 
   size_t GetDstSize() const { return context_.dst_size; }
 
-  mkldnn::convolution_forward::primitive_desc* GetPrimitiveDesc() const {
+  mkldnn::convolution_forward::desc* GetPrimitiveDesc() const {
     return context_.conv_fwd_pd.get();
   }
 
  private:
   struct ConvContext {
-    mkldnn::memory::format src_fmt;
-    mkldnn::memory::format filter_fmt;
-    mkldnn::memory::format dst_fmt;
+    mkldnn::memory::format_tag src_fmt;
+    mkldnn::memory::format_tag filter_fmt;
+    mkldnn::memory::format_tag dst_fmt;
 
     size_t src_size;
     size_t filter_size;
@@ -130,16 +130,16 @@ class ConvPrimitive : public PrimitiveBase {
     std::unique_ptr<mkldnn::memory::desc> bias_md;
     std::unique_ptr<mkldnn::memory::desc> dst_md;
 
-    std::unique_ptr<mkldnn::convolution_forward::primitive_desc> conv_fwd_pd;
+    std::unique_ptr<mkldnn::convolution_forward::desc> conv_fwd_pd;
     std::unique_ptr<mkldnn::primitive> conv_fwd;
 
     std::unique_ptr<mkldnn::stream> stream;
     std::vector<mkldnn::primitive> net;
 
     ConvContext()
-        : src_fmt(mkldnn::memory::format::any),
-          filter_fmt(mkldnn::memory::format::any),
-          dst_fmt(mkldnn::memory::format::any),
+        : src_fmt(mkldnn::memory::format_tag::any),
+          filter_fmt(mkldnn::memory::format_tag::any),
+          dst_fmt(mkldnn::memory::format_tag::any),
           src_size(0),
           filter_size(0),
           dst_size(0),
@@ -157,69 +157,66 @@ class ConvPrimitive : public PrimitiveBase {
   };
 
   void Initialize(const ConvParams& params) {
-    // Set the memory descriptors to format::any to allow MKLDNN to decide what the optimal memory layout should be
+    // Set the memory descriptors to format_tag::any to allow MKLDNN to decide what the optimal memory layout should be
     // for the computation given the input params.
     context_.src_md.reset(new mkldnn::memory::desc(
-        {params.src_dims}, MklDnnType<T>(), mkldnn::memory::format::any));
+        {params.src_dims}, MklDnnType<T>(), mkldnn::memory::format_tag::any));
     context_.filter_md.reset(new mkldnn::memory::desc(
-        {params.filter_dims}, MklDnnType<T>(), mkldnn::memory::format::any));
+        {params.filter_dims}, MklDnnType<T>(), mkldnn::memory::format_tag::any));
     context_.dst_md.reset(new mkldnn::memory::desc(
-        {params.dst_dims}, MklDnnType<T>(), mkldnn::memory::format::any));
+        {params.dst_dims}, MklDnnType<T>(), mkldnn::memory::format_tag::any));
     if (!params.bias_dims.empty())
       context_.bias_md.reset(new mkldnn::memory::desc(
-          {params.bias_dims}, MklDnnType<T>(), mkldnn::memory::format::any));
+          {params.bias_dims}, MklDnnType<T>(), mkldnn::memory::format_tag::any));
 
-    if (!params.bias_dims.empty()) {
-      context_.fwd_desc.reset(new mkldnn::convolution_forward::desc(
-          mkldnn::prop_kind::forward_inference, mkldnn::convolution_direct, *context_.src_md,
-          *context_.filter_md, *context_.bias_md, *context_.dst_md,
-          params.strides, params.dilations, params.padding_left,
-          params.padding_right, mkldnn::padding_kind::zero));
-    } else {
-      context_.fwd_desc.reset(new mkldnn::convolution_forward::desc(
-          mkldnn::prop_kind::forward_inference, mkldnn::convolution_direct, *context_.src_md,
-          *context_.filter_md, *context_.dst_md, params.strides,
-          params.dilations, params.padding_left,
-          params.padding_right, mkldnn::padding_kind::zero));
-    }
+    //if (!params.bias_dims.empty()) {
+    //  context_.fwd_desc.reset(new mkldnn::convolution_forward::desc(
+    //      mkldnn::prop_kind::forward_inference, mkldnn::convolution_direct, *context_.src_md,
+    //      *context_.filter_md, *context_.bias_md, *context_.dst_md,
+    //      params.strides, params.dilations, params.padding_left,
+    //      params.padding_right, {0, 0}));
+    //} else {
+    //  context_.fwd_desc.reset(new mkldnn::convolution_forward::desc(
+    //      mkldnn::prop_kind::forward_inference, mkldnn::convolution_direct, *context_.src_md,
+    //      *context_.filter_md, *context_.dst_md, params.strides,
+    //      params.dilations, params.padding_left,
+    //      params.padding_right, {0, 0}));
+    //}
 
-    context_.conv_fwd_pd.reset(new mkldnn::convolution_forward::primitive_desc(
-        *context_.fwd_desc, cpu_engine_));
+    //context_.conv_fwd_pd.reset(new mkldnn::convolution_forward::desc(
+    //    *context_.fwd_desc, cpu_engine_));
 
-    context_.src_fmt = static_cast<mkldnn::memory::format>(
-        context_.conv_fwd_pd.get()->src_primitive_desc().desc().data.format);
 
-    context_.filter_fmt = static_cast<mkldnn::memory::format>(
-        context_.conv_fwd_pd.get()->weights_primitive_desc().desc().data.format);
+    //context_.filter_fmt = static_cast<mkldnn::memory::format_tag>(
+    //    context_.conv_fwd_pd.get()->weights_desc().desc().data.format_tag);
 
-    context_.dst_fmt = static_cast<mkldnn::memory::format>(
-        context_.conv_fwd_pd.get()->dst_primitive_desc().desc().data.format);
+    //context_.dst_fmt = static_cast<mkldnn::memory::format_tag>(
+    //    context_.conv_fwd_pd.get()->dst_desc().desc().data.format_tag);
 
-    context_.src_size = context_.conv_fwd_pd.get()->src_primitive_desc().get_size();
+    //context_.src_size = context_.conv_fwd_pd.get()->src_desc().get_size();
 
-    context_.filter_size = context_.conv_fwd_pd.get()->weights_primitive_desc().get_size();
+    //context_.filter_size = context_.conv_fwd_pd.get()->weights_desc().get_size();
 
-    context_.dst_size = context_.conv_fwd_pd.get()->dst_primitive_desc().get_size();
+    //context_.dst_size = context_.conv_fwd_pd.get()->dst_desc().get_size();
 
-    context_.src_mem.reset(
-        new mkldnn::memory(context_.conv_fwd_pd.get()->src_primitive_desc(), nullptr));
-    context_.filter_mem.reset(
-        new mkldnn::memory(context_.conv_fwd_pd.get()->weights_primitive_desc(), nullptr));
-    context_.dst_mem.reset(
-        new mkldnn::memory(context_.conv_fwd_pd.get()->dst_primitive_desc(), nullptr));
+    //context_.src_mem.reset(
+    //    new mkldnn::memory(context_.conv_fwd_pd.get()->src_desc(), nullptr));
+    //context_.filter_mem.reset(
+    //    new mkldnn::memory(context_.conv_fwd_pd.get()->weights_desc(), nullptr));
+    //context_.dst_mem.reset(
+    //    new mkldnn::memory(context_.conv_fwd_pd.get()->dst_desc(), nullptr));
 
-    if (!params.bias_dims.empty()) {
-      context_.bias_mem.reset(
-          new mkldnn::memory(context_.conv_fwd_pd.get()->bias_primitive_desc(), nullptr));
+    //if (!params.bias_dims.empty()) {
+    //  context_.bias_mem.reset(
+    //      new mkldnn::memory(context_.conv_fwd_pd.get()->bias_desc(), nullptr));
 
-      context_.conv_fwd.reset(new mkldnn::convolution_forward(
-          *context_.conv_fwd_pd, *context_.src_mem, *context_.filter_mem,
-          *context_.bias_mem, *context_.dst_mem));
-    } else {
-      context_.conv_fwd.reset(
-          new mkldnn::convolution_forward(*context_.conv_fwd_pd, *context_.src_mem,
-                                          *context_.filter_mem, *context_.dst_mem));
-    }
+    //  context_.conv_fwd.reset(new mkldnn::convolution_forward(
+    //      *context_.conv_fwd_pd, *context_.src_mem, *context_.filter_mem,
+    //      *context_.bias_mem, *context_.dst_mem));
+    //} else {
+    //  context_.conv_fwd.reset(
+    //      new mkldnn::convolution_forward(*context_.conv_fwd_pd));
+    //}
 
     context_.net.push_back(*context_.conv_fwd);
   }
@@ -354,107 +351,107 @@ Status Conv<T>::Compute(OpKernelContext* context) const {
                            dst_dims_mkl, strides_mkl, dilations_mkl,
                            padding_left_mkl, padding_right_mkl);
     ConvPrimitive<T>* conv_primitive = ConvPrimitivePool<T>::Get(conv_params);
-    auto conv_fwd_pd = conv_primitive->GetPrimitiveDesc();
+    //auto conv_fwd_pd = conv_primitive->GetPrimitiveDesc();
 
-    mkldnn::engine& cpu_engine = GetEngine();
+    //mkldnn::engine& cpu_engine = GetEngine();
 
-    enum mkldnn::memory::format src_format = mkldnn::memory::format::format_undef;
-    enum mkldnn::memory::format filter_format = mkldnn::memory::format::format_undef;
-    enum mkldnn::memory::format dst_format = mkldnn::memory::format::format_undef;
+    enum mkldnn::memory::format_tag src_format_tag = mkldnn::memory::format_tag::undef;
+    enum mkldnn::memory::format_tag filter_format_tag = mkldnn::memory::format_tag::undef;
+    enum mkldnn::memory::format_tag dst_format_tag = mkldnn::memory::format_tag::undef;
 
     if (kernel_rank == 1) {
-      src_format = mkldnn::memory::format::ncw;
+      src_format_tag = mkldnn::memory::format_tag::ncw;
       if (group_mkl == 1) {
-        filter_format = mkldnn::memory::format::oiw;
+        filter_format_tag = mkldnn::memory::format_tag::oiw;
       } else {
-        filter_format = mkldnn::memory::format::goiw;
+        filter_format_tag = mkldnn::memory::format_tag::goiw;
       }
-      dst_format = mkldnn::memory::format::ncw;
+      dst_format_tag = mkldnn::memory::format_tag::ncw;
     } else if (kernel_rank == 2) {
-      src_format = mkldnn::memory::format::nchw;
+      src_format_tag = mkldnn::memory::format_tag::nchw;
       if (group_mkl == 1) {
-        filter_format = mkldnn::memory::format::oihw;
+        filter_format_tag = mkldnn::memory::format_tag::oihw;
       } else {
-        filter_format = mkldnn::memory::format::goihw;
+        filter_format_tag = mkldnn::memory::format_tag::goihw;
       }
-      dst_format = mkldnn::memory::format::nchw;
+      dst_format_tag = mkldnn::memory::format_tag::nchw;
     } else {
-      src_format = mkldnn::memory::format::ncdhw;
+      src_format_tag = mkldnn::memory::format_tag::ncdhw;
       if (group_mkl == 1) {
-        filter_format = mkldnn::memory::format::oidhw;
+        filter_format_tag = mkldnn::memory::format_tag::oidhw;
       } else {
-        filter_format = mkldnn::memory::format::goidhw;
+        filter_format_tag = mkldnn::memory::format_tag::goidhw;
       }
-      dst_format = mkldnn::memory::format::ncdhw;
+      dst_format_tag = mkldnn::memory::format_tag::ncdhw;
     }
 
-    auto src_md = mkldnn::memory::desc(src_dims_mkl, MklDnnType<T>(), src_format);
-    auto dst_md = mkldnn::memory::desc(dst_dims_mkl, MklDnnType<T>(), dst_format);
+    auto src_md = mkldnn::memory::desc(src_dims_mkl, MklDnnType<T>(), src_format_tag);
+    auto dst_md = mkldnn::memory::desc(dst_dims_mkl, MklDnnType<T>(), dst_format_tag);
 
     // Reorder src memory layout if necessary.
-    if (src_md.data.format != conv_primitive->GetSrcMemoryFormat()) {
-      auto pd = mkldnn::memory::primitive_desc(src_md, cpu_engine);
-      mkldnn::memory src = mkldnn::memory(pd, (void*)src_data);
-      // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
-      // mkldnn using padding to allow use of blocked format.
-      src_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, conv_primitive->GetSrcSize());
-      mkldnn::memory dst = mkldnn::memory(conv_fwd_pd->src_primitive_desc(), src_reorder_buffer.get());
-      MemoryReorderParams params(src, dst);
-      DoReorder<T>(params);
-      src_data = static_cast<T*>(dst.get_data_handle());
-    }
+    //if (src_md.data.format_tag != conv_primitive->GetSrcMemoryformat_tag()) {
+    //  auto pd = mkldnn::memory::desc(src_md, cpu_engine);
+    //  mkldnn::memory src = mkldnn::memory(pd, (void*)src_data);
+    //  // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
+    //  // mkldnn using padding to allow use of blocked format_tag.
+    //  src_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, conv_primitive->GetSrcSize());
+    //  mkldnn::memory dst = mkldnn::memory(conv_fwd_pd->src_desc(), src_reorder_buffer.get());
+    //  MemoryReorderParams params(src, dst);
+    //  DoReorder<T>(params);
+    //  src_data = static_cast<T*>(dst.get_data_handle());
+    //}
 
     // Reorder filter memory layout if necessary
-    // Avoid data reordering. Save filter memory in mkldnn format from first iteration
+    // Avoid data reordering. Save filter memory in mkldnn format_tag from first iteration
     // in execution provider mapped by weight name.
-    {
-      // lock to make sure reordering is done only once
-      std::lock_guard<OrtMutex> lock(provider_->GetMutex());
-      auto weight_name = OpKernel::Node().InputDefs()[1]->Name();
-      std::shared_ptr<mkldnn::memory> filter_dst_mem = provider_->GetWeightsMemoryBuffer(weight_name);
+    //{
+    //  // lock to make sure reordering is done only once
+    //  std::lock_guard<OrtMutex> lock(provider_->GetMutex());
+    //  auto weight_name = OpKernel::Node().InputDefs()[1]->Name();
+    //  std::shared_ptr<mkldnn::memory> filter_dst_mem = provider_->GetWeightsMemoryBuffer(weight_name);
 
-      if (filter_dst_mem == nullptr) {
-        if (filter_format != conv_primitive->GetFilterMemoryFormat()) {
-          auto pd = mkldnn::memory::primitive_desc(mkldnn::memory::desc(
-                                                       filter_dims_mkl, MklDnnType<T>(), filter_format),
-                                                   cpu_engine);
-          mkldnn::memory src = mkldnn::memory(pd, (void*)filter_data);
-          IAllocatorUniquePtr<void> filter_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, conv_primitive->GetFilterSize());
-          filter_dst_mem.reset(
-              new mkldnn::memory(conv_fwd_pd->weights_primitive_desc(), filter_reorder_buffer.get()));
+    //  if (filter_dst_mem == nullptr) {
+    //    if (filter_format_tag != conv_primitive->GetFilterMemoryformat_tag()) {
+    //      auto pd = mkldnn::memory::desc(mkldnn::memory::desc(
+    //                                                   filter_dims_mkl, MklDnnType<T>(), filter_format_tag),
+    //                                               cpu_engine);
+    //      mkldnn::memory src = mkldnn::memory(pd, (void*)filter_data);
+    //      IAllocatorUniquePtr<void> filter_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, conv_primitive->GetFilterSize());
+    //      filter_dst_mem.reset(
+    //          new mkldnn::memory(conv_fwd_pd->weights_desc(), filter_reorder_buffer.get()));
 
-          MemoryReorderParams params(src, *filter_dst_mem);
-          DoReorder<T>(params);
-          provider_->SaveAllocatedMemory(std::move(filter_reorder_buffer));
+    //      MemoryReorderParams params(src, *filter_dst_mem);
+    //      DoReorder<T>(params);
+    //      provider_->SaveAllocatedMemory(std::move(filter_reorder_buffer));
 
-          filter_data = static_cast<T*>(filter_dst_mem->get_data_handle());
-          provider_->SetWeightsMemoryBuffer(weight_name, filter_dst_mem);
-        }
-      } else {
-        filter_data = static_cast<T*>(filter_dst_mem->get_data_handle());
-      }
-    }
+    //      filter_data = static_cast<T*>(filter_dst_mem->get_data_handle());
+    //      provider_->SetWeightsMemoryBuffer(weight_name, filter_dst_mem);
+    //    }
+    //  } else {
+    //    filter_data = static_cast<T*>(filter_dst_mem->get_data_handle());
+    //  }
+    //}
     // Allocate dst buffer if reorder is necessary
-    if (dst_md.data.format != conv_primitive->GetDstMemoryFormat()) {
-      // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
-      // mkldnn using padding to allow use of blocked format.
-      dst_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, conv_primitive->GetDstSize());
-      dst_data = static_cast<T*>(dst_reorder_buffer.get());
-    }
+    //if (dst_md.data.format_tag != conv_primitive->GetDstMemoryformat_tag()) {
+    //  // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
+    //  // mkldnn using padding to allow use of blocked format_tag.
+    //  dst_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, conv_primitive->GetDstSize());
+    //  dst_data = static_cast<T*>(dst_reorder_buffer.get());
+    //}
 
     conv_primitive->Compute(src_data, filter_data, dst_data, bias_data);
 
     // Reorder dst memory layout if necessary
-    if (dst_md.data.format != conv_primitive->GetDstMemoryFormat()) {
-      mkldnn::memory src = mkldnn::memory(conv_fwd_pd->dst_primitive_desc(), (void*)dst_data);
-      auto pd = mkldnn::memory::primitive_desc(dst_md, cpu_engine);
-      mkldnn::memory dst = mkldnn::memory(pd, Y->template MutableData<T>());
-      MemoryReorderParams params(src, dst);
-      DoReorder<T>(params);
-    }
+    //if (dst_md.data.format_tag != conv_primitive->GetDstMemoryformat_tag()) {
+    //  mkldnn::memory src = mkldnn::memory(conv_fwd_pd->dst_desc(), (void*)dst_data);
+    //  auto pd = mkldnn::memory::desc(dst_md, cpu_engine);
+    //  mkldnn::memory dst = mkldnn::memory(pd, Y->template MutableData<T>());
+    //  MemoryReorderParams params(src, dst);
+    //  DoReorder<T>(params);
+    //}
 
   } catch (const mkldnn::error& e) {
-    return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Status: ", e.status, ", message: ", e.message.c_str());
+    return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Status: ", e.status, ", message: ", e.what());
   }
 
   return Status::OK();

@@ -46,7 +46,7 @@ class SumPrimitive final : public PrimitiveBase {
  public:
   explicit SumPrimitive(const SumParams& params)
       : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
+    //context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
     if (context_.sum_pd == nullptr) {
       Initialize(params);
     }
@@ -68,7 +68,7 @@ class SumPrimitive final : public PrimitiveBase {
       context_.srcs_memory[i].set_data_handle(
         static_cast<void*>(const_cast<T*>(src_data)));
     }
-    context_.stream->submit(context_.net);
+    //context_.stream->submit(context_.net);
 
     for (int i = 0; i < numinputs; i++) {
       context_.srcs_memory[i].set_data_handle(nullptr);
@@ -93,9 +93,9 @@ class SumPrimitive final : public PrimitiveBase {
     std::vector<mkldnn::memory> srcs_memory;
     std::unique_ptr<mkldnn::memory> dst_mem;
 
-    std::vector<mkldnn::memory::primitive_desc> srcs_pd;
-    std::unique_ptr<mkldnn::memory::primitive_desc> src_mpd;
-    std::unique_ptr<mkldnn::memory::primitive_desc> dst_pd;
+    std::vector<mkldnn::memory::desc> srcs_pd;
+    std::unique_ptr<mkldnn::memory::desc> src_mpd;
+    std::unique_ptr<mkldnn::memory::desc> dst_pd;
     std::unique_ptr<mkldnn::sum::primitive_desc> sum_pd;
 
     std::unique_ptr<mkldnn::stream> stream;
@@ -103,43 +103,43 @@ class SumPrimitive final : public PrimitiveBase {
   };
 
   void Initialize(const SumParams& params) {
-    std::vector<float> coeff;
+    //std::vector<float> coeff;
 
-    mkldnn::memory::format fmt = mkldnn::memory::format::any;
-    switch (params.num_dimensions) {
-    case 1: { fmt = mkldnn::memory::format::x; break; }
-    case 2: { fmt = mkldnn::memory::format::nc; break; }
-    case 3: { fmt = mkldnn::memory::format::ntc; break; }
-    case 4: { fmt = mkldnn::memory::format::nchw; break; }
-    case 5: { fmt = mkldnn::memory::format::ncdhw; break; }
-    default: {  fmt = mkldnn::memory::format::any; break; }
-    }
+    //mkldnn::memory::format_tag fmt = mkldnn::memory::format_tag::any;
+    //switch (params.num_dimensions) {
+    //case 1: { fmt = mkldnn::memory::format_tag::x; break; }
+    //case 2: { fmt = mkldnn::memory::format_tag::nc; break; }
+    //case 3: { fmt = mkldnn::memory::format_tag::ntc; break; }
+    //case 4: { fmt = mkldnn::memory::format_tag::nchw; break; }
+    //case 5: { fmt = mkldnn::memory::format_tag::ncdhw; break; }
+    //default: {  fmt = mkldnn::memory::format_tag::any; break; }
+    //}
 
-    for (int i = 0; i < params.num_inputs; i++) {
-      context_.src_md.reset(
-        new mkldnn::memory::desc({params.src_dims[i]}, MklDnnType<T>(), fmt));
-      auto mpd = mkldnn::memory::primitive_desc(*context_.src_md, cpu_engine_);
-      auto src_memory = mkldnn::memory(mpd, nullptr);
+    //for (int i = 0; i < params.num_inputs; i++) {
+    //  context_.src_md.reset(
+    //    new mkldnn::memory::desc({params.src_dims[i]}, MklDnnType<T>(), fmt));
+    //  auto mpd = mkldnn::memory::primitive_desc(*context_.src_md, cpu_engine_);
+    //  auto src_memory = mkldnn::memory(mpd, nullptr);
 
-      context_.srcs_pd.push_back(mpd);
-      context_.srcs_memory.push_back(src_memory);
-      coeff.push_back(1.0);
-    }
+    //  context_.srcs_pd.push_back(mpd);
+    //  context_.srcs_memory.push_back(src_memory);
+    //  coeff.push_back(1.0);
+    //}
 
-    std::unique_ptr<mkldnn::memory> dst;
+    //std::unique_ptr<mkldnn::memory> dst;
     context_.dst_md.reset(new mkldnn::memory::desc(
-      {params.dst_dim}, MklDnnType<T>(), mkldnn::memory::format::any));
-    context_.sum_pd.reset(new mkldnn::sum::primitive_desc(
-      *context_.dst_md, coeff, context_.srcs_pd));
-    context_.dst_mem.reset(new mkldnn::memory(
-      context_.sum_pd->dst_primitive_desc(), nullptr));
+      {params.dst_dim}, MklDnnType<T>(), mkldnn::memory::format_tag::any));
+    //context_.sum_pd.reset(new mkldnn::sum::primitive_desc(
+    //  *context_.dst_md, coeff, context_.srcs_pd));
+    //context_.dst_mem.reset(new mkldnn::memory(
+    //  context_.sum_pd->dst_primitive_desc(), nullptr));
 
-    std::vector<mkldnn::primitive::at> inputs;
-    for (int i = 0; i < params.num_inputs; i++) {
-      inputs.push_back(context_.srcs_memory[i]);
-    }
-    auto c = mkldnn::sum(*context_.sum_pd, inputs, *context_.dst_mem);
-    context_.net.push_back(c);
+    //std::vector<mkldnn::primitive::at> inputs;
+    //for (int i = 0; i < params.num_inputs; i++) {
+    //  inputs.push_back(context_.srcs_memory[i]);
+    //}
+    //auto c = mkldnn::sum(*context_.sum_pd, inputs, *context_.dst_mem);
+    //context_.net.push_back(c);
   }
 
   SumContext context_;
@@ -217,7 +217,7 @@ Status Sum<T>::Compute(OpKernelContext* context) const {
     sum_primitive->Compute(context, num_inputs);
   } catch (const mkldnn::error& e) {
     return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Status: ", e.status, 
-      ", message: ", e.message.c_str());
+      ", message: ", e.what());
   }
 
   return Status::OK();

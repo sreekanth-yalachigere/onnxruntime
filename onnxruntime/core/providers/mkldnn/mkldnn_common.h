@@ -19,7 +19,7 @@ mkldnn::memory::data_type MklDnnType<float>() {
 }
 
 static mkldnn::engine& GetEngine() {
-  static mkldnn::engine cpu_engine = mkldnn::engine(mkldnn::engine::cpu, 0);
+  static mkldnn::engine cpu_engine = mkldnn::engine(mkldnn::engine::kind::cpu, 0);
   return cpu_engine;
 }
 
@@ -81,15 +81,15 @@ struct MemoryReorderParams {
     std::string key;
     key.reserve(64);
     key.append("reorder_");
-    const auto& src_desc = src.get_primitive_desc().desc().data;
-    const auto& dst_desc = dst.get_primitive_desc().desc().data;
+    const auto& src_desc = src.get_desc().data;
+    const auto& dst_desc = dst.get_desc().data;
     mkldnn::memory::dims src_dims(src_desc.dims, &src_desc.dims[src_desc.ndims]);
     mkldnn::memory::dims dst_dims(dst_desc.dims, &dst_desc.dims[dst_desc.ndims]);
-    key.append(std::to_string(src_desc.format));
+    //key.append(std::to_string(src_desc.format));
     key.append(1, '_');
     key.append(std::to_string(dst_desc.data_type));
     AddDimsToKey(key, src_dims);
-    key.append(std::to_string(dst_desc.format));
+    //key.append(std::to_string(dst_desc.format));
     key.append(1, '_');
     key.append(std::to_string(dst_desc.data_type));
     AddDimsToKey(key, dst_dims);
@@ -129,9 +129,9 @@ class MemoryReorderPrimitive : public PrimitiveBase {
 
   void Initialize(const MemoryReorderParams& params) {
     context_.src_mem = std::make_shared<mkldnn::memory>(
-        mkldnn::memory({params.src.get_primitive_desc().desc(), cpu_engine_}, nullptr));
+        mkldnn::memory({params.src.get_desc(), cpu_engine_}));
     context_.dst_mem = std::make_shared<mkldnn::memory>(
-        mkldnn::memory({params.dst.get_primitive_desc().desc(), cpu_engine_}, nullptr));
+        mkldnn::memory({params.dst.get_desc(), cpu_engine_}));
     context_.primitive = std::make_shared<mkldnn::reorder>(
         mkldnn::reorder(*context_.src_mem, *context_.dst_mem));
   }
@@ -168,7 +168,7 @@ template <typename T>
 static void DoReorder(const MemoryReorderParams& params) {
   std::vector<mkldnn::primitive> net;
   net.push_back(*(MemoryReorderPrimitivePool<T>::Get(params)->GetPrimitive()));
-  mkldnn::stream(mkldnn::stream::kind::eager).submit(net).wait();
+  // mkldnn::stream(mkldnn::stream::kind::eager).submit(net).wait();
 }
 
 }  // namespace mkl_dnn

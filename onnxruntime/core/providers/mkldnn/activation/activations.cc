@@ -38,7 +38,7 @@ class ReluPrimitive final : public PrimitiveBase {
  public:
   explicit ReluPrimitive(const ReluParams& params)
       : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
+    //context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
     if (context_.relu_fwd == nullptr) {
       Initialize(params);
     }
@@ -51,7 +51,7 @@ class ReluPrimitive final : public PrimitiveBase {
 		  static_cast<void*>(const_cast<T*>(src_data)));
 	  context_.dst_mem->set_data_handle(
 		  static_cast<void*>(dst_data));
-	  context_.stream->submit(context_.net);
+	  //context_.stream->submit(context_.net);
 
 	  context_.src_mem->set_data_handle(nullptr);
 	  context_.dst_mem->set_data_handle(nullptr);
@@ -60,8 +60,6 @@ class ReluPrimitive final : public PrimitiveBase {
 
  private:
   struct ReluContext {
-    mkldnn::memory::format src_fmt;
-
     std::unique_ptr<mkldnn::memory> src_mem;
     std::unique_ptr<mkldnn::memory> dst_mem;
 
@@ -81,14 +79,32 @@ class ReluPrimitive final : public PrimitiveBase {
 
   void Initialize(const ReluParams& params) {
     
-    mkldnn::memory::format fmt = mkldnn::memory::format::any;
+    mkldnn::memory::format_tag fmt = mkldnn::memory::format_tag::any;
     switch (params.src_dims.size()) {
-    case 1: { fmt = mkldnn::memory::format::x; break; }
-    case 2: { fmt = mkldnn::memory::format::nc; break; }
-    case 3: { fmt = mkldnn::memory::format::ntc; break; }
-    case 4: { fmt = mkldnn::memory::format::nchw; break; }
-    case 5: { fmt = mkldnn::memory::format::ncdhw; break; }
-    default: {  fmt = mkldnn::memory::format::any; break; }
+      case 1: {
+        fmt = mkldnn::memory::format_tag::x;
+        break;
+      }
+      case 2: {
+        fmt = mkldnn::memory::format_tag::nc;
+        break;
+      }
+      case 3: {
+        fmt = mkldnn::memory::format_tag::ntc;
+        break;
+      }
+      case 4: {
+        fmt = mkldnn::memory::format_tag::nchw;
+        break;
+      }
+      case 5: {
+        fmt = mkldnn::memory::format_tag::ncdhw;
+        break;
+      }
+      default: {
+        fmt = mkldnn::memory::format_tag::any;
+        break;
+      }
     }
 
     context_.src_md.reset(new mkldnn::memory::desc({ params.src_dims}, MklDnnType<T>(), fmt));
@@ -100,16 +116,13 @@ class ReluPrimitive final : public PrimitiveBase {
     context_.relu_fwd_pd.reset(new mkldnn::eltwise_forward::primitive_desc(
       *context_.fwd_desc, cpu_engine_));
 
-    context_.src_fmt = static_cast<mkldnn::memory::format>(
-      context_.relu_fwd_pd.get()->src_primitive_desc().desc().data.format);
+    context_.src_size = context_.relu_fwd_pd.get()->src_desc().get_size();
+    context_.dst_size = context_.relu_fwd_pd.get()->dst_desc().get_size();
 
-    context_.src_size = context_.relu_fwd_pd.get()->src_primitive_desc().get_size();
-    context_.dst_size = context_.relu_fwd_pd.get()->dst_primitive_desc().get_size();
-
-    context_.src_mem.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->src_primitive_desc(), nullptr));
-    context_.dst_mem.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->dst_primitive_desc(), nullptr));
+    //context_.src_mem.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->src_desc(), nullptr));
+    //context_.dst_mem.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->dst_desc(), nullptr));
     context_.relu_fwd.reset(
-      new mkldnn::eltwise_forward(*context_.relu_fwd_pd, *context_.src_mem, *context_.dst_mem));
+      new mkldnn::eltwise_forward(*context_.relu_fwd_pd));
     context_.net.push_back(*context_.relu_fwd);
   }
 
@@ -177,7 +190,7 @@ Status Relu<T>::Compute(OpKernelContext* context) const {
     relu_primitive->Compute(src_data, dst_data);
   } catch (const mkldnn::error& e) {
     return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Status: ", e.status, 
-		", message: ", e.message.c_str());
+		", message: ", e.what());
   }
 
   return Status::OK();

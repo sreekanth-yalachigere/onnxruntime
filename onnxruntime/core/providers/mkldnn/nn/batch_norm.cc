@@ -58,7 +58,7 @@ class BatchNormPrimitive final : public PrimitiveBase {
  public:
   explicit BatchNormPrimitive(const BatchNormParams& params)
       : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
+    //context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
     if (context_.batchnorm_fwd == nullptr) {
       Initialize(params);
     }
@@ -85,7 +85,6 @@ class BatchNormPrimitive final : public PrimitiveBase {
 
     MEMCPY_S(scale_shift_buf, scale_data, src_bytes, dst_bytes);
     MEMCPY_S(&scale_shift_buf[scale_dims_channels], b_data, src_bytes, dst_bytes);
-    context_.stream->submit(context_.net);
     return;
   }
 
@@ -117,63 +116,81 @@ class BatchNormPrimitive final : public PrimitiveBase {
   };
 
   void Initialize(const BatchNormParams& params) {
-    mkldnn::memory::format fmt = mkldnn::memory::format::any;
+    mkldnn::memory::format_tag fmt = mkldnn::memory::format_tag::any;
     switch (params.src_dims.size()) {
-    case 1: { fmt = mkldnn::memory::format::x; break; }
-    case 2: { fmt = mkldnn::memory::format::nc; break; }
-    case 3: { fmt = mkldnn::memory::format::ntc; break; }
-    case 4: { fmt = mkldnn::memory::format::nchw; break; }
-    case 5: { fmt = mkldnn::memory::format::ncdhw; break; }
-    default: {  fmt = mkldnn::memory::format::any; break; }
+      case 1: {
+        fmt = mkldnn::memory::format_tag::x;
+        break;
+      }
+      case 2: {
+        fmt = mkldnn::memory::format_tag::nc;
+        break;
+      }
+      case 3: {
+        fmt = mkldnn::memory::format_tag::ntc;
+        break;
+      }
+      case 4: {
+        fmt = mkldnn::memory::format_tag::nchw;
+        break;
+      }
+      case 5: {
+        fmt = mkldnn::memory::format_tag::ncdhw;
+        break;
+      }
+      default: {
+        fmt = mkldnn::memory::format_tag::any;
+        break;
+      }
     }
     context_.src_md.reset(new mkldnn::memory::desc(
       { params.src_dims }, MklDnnType<T>(), fmt));
 
     context_.scale_shift_md.reset(new mkldnn::memory::desc(
-      { 2, params.scale_dims[0] }, MklDnnType<T>(), mkldnn::memory::format::nc));
+        {2, params.scale_dims[0]}, MklDnnType<T>(), mkldnn::memory::format_tag::nc));
 
     context_.mean_md.reset(new mkldnn::memory::desc(
-      { params.mean_dims }, MklDnnType<T>(), mkldnn::memory::format::x));
+        {params.mean_dims}, MklDnnType<T>(), mkldnn::memory::format_tag::x));
     context_.var_md.reset(new mkldnn::memory::desc(
-      { params.var_dims }, MklDnnType<T>(), mkldnn::memory::format::x));
+        {params.var_dims}, MklDnnType<T>(), mkldnn::memory::format_tag::x));
     context_.dst_md.reset(new mkldnn::memory::desc(
       { params.dst_dims }, MklDnnType<T>(), fmt));
 
-    context_.src_mem.reset(
-      new mkldnn::memory({ *context_.src_md, cpu_engine_ }, nullptr));
+    //context_.src_mem.reset(
+    //  new mkldnn::memory({ *context_.src_md, cpu_engine_ }, nullptr));
    
    // scale_shift_mem will allocate 2*C*sizeof(float) buffer
    //
     context_.scale_shift_mem.reset(
       new mkldnn::memory({ *context_.scale_shift_md, cpu_engine_ }));
 
-    context_.mean_mem.reset(
-      new mkldnn::memory({ *context_.mean_md, cpu_engine_ }, nullptr));
-    context_.var_mem.reset(
-      new mkldnn::memory({ *context_.var_md, cpu_engine_ }, nullptr));
+    //context_.mean_mem.reset(
+    //  new mkldnn::memory({ *context_.mean_md, cpu_engine_ }, nullptr));
+    //context_.var_mem.reset(
+    //  new mkldnn::memory({ *context_.var_md, cpu_engine_ }, nullptr));
 
-    context_.batchnorm_fwd.reset(new mkldnn::batch_normalization_forward::desc(
-      mkldnn::prop_kind::forward_inference, *context_.src_md, params.epsilon,
-      mkldnn::batch_normalization_flag::use_scale_shift |
-      mkldnn::batch_normalization_flag::use_global_stats));
+    //context_.batchnorm_fwd.reset(new mkldnn::batch_normalization_forward::desc(
+    //  mkldnn::prop_kind::forward_inference, *context_.src_md, params.epsilon,
+    //  mkldnn::batch_normalization_flag::use_scale_shift |
+    //  mkldnn::batch_normalization_flag::use_global_stats));
 
    context_.batchnorm_fwd_pd.reset(
      new mkldnn::batch_normalization_forward::primitive_desc(
        *context_.batchnorm_fwd, cpu_engine_));
 
-   context_.dst_mem.reset(
-     new mkldnn::memory(
-       context_.batchnorm_fwd_pd->dst_primitive_desc(), nullptr));
+   //context_.dst_mem.reset(
+   //  new mkldnn::memory(
+   //    context_.batchnorm_fwd_pd->dst_primitive_desc(), nullptr));
 
-   auto bn = mkldnn::batch_normalization_forward(
-     *context_.batchnorm_fwd_pd,
-     (const mkldnn::primitive::at)*context_.src_mem,
-     (const mkldnn::primitive::at)*context_.mean_mem,
-     (const mkldnn::primitive::at)*context_.var_mem,
-     (const mkldnn::memory)*context_.scale_shift_mem,
-     (const mkldnn::memory) *context_.dst_mem);
-   
-   context_.net.push_back(bn);
+   //auto bn = mkldnn::batch_normalization_forward(
+   //  *context_.batchnorm_fwd_pd,
+   //  (const mkldnn::primitive::at)*context_.src_mem,
+   //  (const mkldnn::primitive::at)*context_.mean_mem,
+   //  (const mkldnn::primitive::at)*context_.var_mem,
+   //  (const mkldnn::memory)*context_.scale_shift_mem,
+   //  (const mkldnn::memory) *context_.dst_mem);
+   //
+   //context_.net.push_back(bn);
   }
 
   BatchNormContext context_;
@@ -267,7 +284,7 @@ Status BatchNorm<T>::Compute(OpKernelContext* context) const {
 
   } catch (const mkldnn::error& e) {
     return ORT_MAKE_STATUS(
-      ONNXRUNTIME, FAIL, "Status: ", e.status, ", message: ", e.message.c_str());
+      ONNXRUNTIME, FAIL, "Status: ", e.status, ", message: ", e.what());
   }
 
   return Status::OK();
