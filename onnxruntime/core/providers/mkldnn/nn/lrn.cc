@@ -53,7 +53,7 @@ class LRNPrimitive : public PrimitiveBase {
  public:
   explicit LRNPrimitive(const LRNParams& params)
       : cpu_engine_(GetEngine()) {
-    //context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
+    context_.stream.reset(new mkldnn::stream(cpu_engine_));
     if (context_.lrn_fwd == nullptr) {
       Initialize(params);
     }
@@ -64,7 +64,11 @@ class LRNPrimitive : public PrimitiveBase {
   void Compute(const T* src_data, T* dst_data) {
     context_.src_mem->set_data_handle(static_cast<void*>(const_cast<T*>(src_data)));
     context_.dst_mem->set_data_handle(static_cast<void*>(dst_data));
-    //context_.stream->submit(context_.net);
+
+	context_.lrn_fwd->execute(
+        *context_.stream,
+        {{MKLDNN_ARG_SRC, *context_.src_mem},
+         {MKLDNN_ARG_DST, *context_.dst_mem}});
 
     context_.src_mem->set_data_handle(nullptr);
     context_.dst_mem->set_data_handle(nullptr);
@@ -123,17 +127,13 @@ class LRNPrimitive : public PrimitiveBase {
     context_.fwd_primitive_desc.reset(new mkldnn::lrn_forward::primitive_desc(
         *context_.fwd_desc, cpu_engine_));
 
-    //context_.src_fmt = static_cast<mkldnn::memory::format_tag>(
-    //    context_.fwd_primitive_desc.get()->src_primitive_desc().desc().data.format);
-
     context_.src_size = context_.fwd_primitive_desc.get()->src_desc().get_size();
     context_.dst_size = context_.fwd_primitive_desc.get()->dst_desc().get_size();
 
-    //context_.src_mem.reset(new mkldnn::memory(context_.fwd_desc.get()->src_primitive_desc(), nullptr));
-    //context_.dst_mem.reset(new mkldnn::memory(context_.fwd_des.get()->dst_primitive_desc(), nullptr));
-    //context_.lrn_fwd.reset(
-    //    new mkldnn::lrn_forward(*context_.fwd_primitive_desc, *context_.src_mem, *context_.dst_mem));
-    //context_.net.push_back(*context_.lrn_fwd);
+    context_.src_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->src_desc(), cpu_engine_, nullptr));
+    context_.dst_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->dst_desc(), cpu_engine_, nullptr));
+    context_.lrn_fwd.reset(
+		new mkldnn::lrn_forward(*context_.fwd_primitive_desc));
   }
 
   LRNContext context_;

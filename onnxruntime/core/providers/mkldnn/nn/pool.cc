@@ -82,7 +82,7 @@ class PoolPrimitive : public PrimitiveBase {
  public:
   explicit PoolPrimitive(const PoolParams& params)
       : cpu_engine_(GetEngine()) {
-    //context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
+    context_.stream.reset(new mkldnn::stream(cpu_engine_));
     if (context_.pool_fwd == nullptr) {
       Initialize(params);
     }
@@ -178,12 +178,6 @@ class PoolPrimitive : public PrimitiveBase {
 
     context_.fwd_primitive_desc.reset(new mkldnn::pooling_forward::primitive_desc(
         *context_.fwd_desc, cpu_engine_));
-
-    //context_.src_fmt = static_cast<mkldnn::memory::format_tag>(
-    //    context_.fwd_primitive_desc.get()->src_desc().desc().data.format);
-
-    //context_.dst_fmt = static_cast<mkldnn::memory::format_tag>(
-    //    context_.fwd_primitive_desc.get()->dst_desc().desc().data.format);
 
     context_.src_size = context_.fwd_primitive_desc.get()->src_desc().get_size();
     context_.dst_size = context_.fwd_primitive_desc.get()->dst_desc().get_size();
