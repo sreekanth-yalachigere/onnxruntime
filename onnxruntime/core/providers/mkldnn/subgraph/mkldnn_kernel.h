@@ -19,6 +19,7 @@ class MklDnnKernel {
  public:
   MklDnnKernel(const MklDnnNode& node,
                MKLDNNExecutionProvider* provider) {
+    name_ = node.name;
     mklnode_ptr_ = std::make_shared<MklDnnNode>(node);
     provider_ = provider;
     alloc_ = provider_->GetAllocator(0, OrtMemTypeDefault);
@@ -86,6 +87,7 @@ class MklDnnKernel {
   mkldnn::memory::format_tag GetSourceFormat(int dim_size);
 
  public:
+  std::string name_;
   std::vector<std::shared_ptr<MklDnnKernel>> parents_;
   bool fuse_relu_ = false;
   bool fuse_sum_ = false;

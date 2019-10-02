@@ -247,7 +247,6 @@ Status MkldnnFuncKernel<T>::Compute(const OrtCustomOpApi* api, OrtKernelContext*
     primitive->UpdateProvider(params_);
     status = primitive->Compute(api, context);
   } catch (const mkldnn::error& e) {
-    printf(e.what());
     return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Status: ", e.status,
                            ", message: ", e.what());
   }

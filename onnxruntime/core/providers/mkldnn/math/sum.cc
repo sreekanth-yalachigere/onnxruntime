@@ -46,7 +46,7 @@ class SumPrimitive final : public PrimitiveBase {
  public:
   explicit SumPrimitive(const SumParams& params)
       : cpu_engine_(GetEngine()) {
-    //context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
+    context_.stream.reset(new mkldnn::stream(cpu_engine_));
     if (context_.sum_pd == nullptr) {
       Initialize(params);
     }
@@ -78,9 +78,9 @@ class SumPrimitive final : public PrimitiveBase {
     context_.net[0].execute(
         *context_.stream, args);
 
-    for (int i = 0; i < numinputs; i++) {
-      context_.srcs_memory[i].set_data_handle(nullptr);
-    }
+    //for (int i = 0; i < numinputs; i++) {
+    //  context_.srcs_memory[i].set_data_handle(nullptr);
+    //}
   }
 
   std::unique_ptr<mkldnn::memory::desc> GetDstMemoryDesc() const {

@@ -111,8 +111,7 @@ class MklDnnConv : public MklDnnKernel {
       source_desc_ = parents_[0].get()->primitive_dst_desc_;
 
 	  mkldnn::memory::dims src_dims_mkl(x_shape.GetDims().begin(), x_shape.GetDims().end());
-      src_md_.reset(new mkldnn::memory::desc(
-          {src_dims_mkl}, MklDnnType<T>(), mkldnn::memory::format_tag::any));
+      src_md_.reset(new mkldnn::memory::desc(source_desc_));
     }
 
     primitive_created_ = ValidateInputShape(x_shape, w_shape);
@@ -229,7 +228,7 @@ class MklDnnConv : public MklDnnKernel {
       source_format_ = src_format;
 
       src_md_.reset(new mkldnn::memory::desc({src_dims_mkl}, MklDnnType<T>(), src_format));
-      src_mem_.reset(new mkldnn::memory({{src_dims_mkl}, MklDnnType<T>(), src_format}, cpu_engine, nullptr));
+      src_mem_.reset(new mkldnn::memory(*src_md_, cpu_engine, nullptr));
     }
     if (ort_source_format_ == mkldnn::memory::format_tag::any) {
       ort_source_format_ = src_format;

@@ -72,23 +72,21 @@ class MklDnnSum : public MklDnnKernel {
         auto xdim = tensor_shape.size();
         mkldnn::memory::dims dims(xdim);
 
-        ort_source_format_ = GetSourceFormat(static_cast<int>(xdim));
         x_shape1 = TensorShape(xshape, xdim);
         mkldnn::memory::dims src_dims(
             x_shape1.GetDims().begin(), x_shape1.GetDims().end());
-
-        auto mpd = mkldnn::memory::desc(src_dims, MklDnnType<T>(), source_format_);
+        auto mpd = mkldnn::memory::desc({src_dims}, MklDnnType<T>(), source_format_);
         auto src_memory = mkldnn::memory(mpd, cpu_engine, nullptr);
         srcs_pd_.push_back(mpd);
         srcs_memory_.push_back(src_memory);
         coeff.push_back(1.0);
       } else {
-        auto mpd = mkldnn::memory::desc(parents_[0].get()->primitive_dst_desc_);
-        auto src_memory = *parents_[i].get()->primitive_dst_mem_;  //mkldnn::memory(mpd);
+        x_shape = parents_[0].get()->primitive_dst_shape_;
+        auto mpd = mkldnn::memory::desc(parents_[i].get()->primitive_dst_desc_);
+        auto src_memory = *parents_[i].get()->primitive_dst_mem_;
         srcs_pd_.push_back(mpd);
         srcs_memory_.push_back(src_memory);
         coeff.push_back(1.0);
-        ort_source_format_ = source_format_;
       }
     }
 
@@ -96,7 +94,6 @@ class MklDnnSum : public MklDnnKernel {
         {dst_dims_mkl}, MklDnnType<T>(), mkldnn::memory::format_tag::any));
     sum_pd_.reset(new mkldnn::sum::primitive_desc(
         *primitive_dst_md_, coeff, srcs_pd_, cpu_engine));
-    primitive_dst_desc_ = sum_pd_->dst_desc();
 
     if (mklnode_ptr_->output_index >= 0) {
       // last node of sub-graph. need to allocate memory for output_tensor
@@ -115,16 +112,12 @@ class MklDnnSum : public MklDnnKernel {
     }
     primitive_dst_desc_ = sum_pd_->dst_desc();
 
-    std::vector<mkldnn::memory> inputs;
-    for (int i = 0; i < num_inputs; i++) {
-      inputs.push_back(srcs_memory_[i]);
-    }
     auto c = mkldnn::sum(*sum_pd_);
     net.push_back(c);
     std::unordered_map<int, mkldnn::memory> args{
         {MKLDNN_ARG_DST, *primitive_dst_mem_}};
     for (int i = 0; i < (int)num_inputs; i++) {
-      args.insert({MKLDNN_ARG_MULTIPLE_SRC + i, inputs[i]});
+      args.insert({MKLDNN_ARG_MULTIPLE_SRC + i, srcs_memory_[i]});
     }
     net_args.push_back(args);
 
@@ -168,6 +161,7 @@ class MklDnnSum : public MklDnnKernel {
   }
 
  private:
+  std::unique_ptr<mkldnn::memory::desc> src_md_;
   std::vector<mkldnn::memory::desc> src_mds_;
   std::vector<mkldnn::memory> srcs_memory_;
 
