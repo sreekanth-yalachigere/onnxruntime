@@ -41,13 +41,12 @@ class MklDnnSum : public MklDnnKernel {
       auto xdim = tensor_shape.size();
 
       ort_source_format_ = GetSourceFormat(static_cast<int>(xdim));
-      source_format_ = ort_source_format_;
 
       x_shape = TensorShape(xshape, xdim);
       mkldnn::memory::dims src_dims(
           x_shape.GetDims().begin(), x_shape.GetDims().end());
       ort_source_desc_ = mkldnn::memory::desc(
-          {src_dims}, MklDnnType<T>(), source_format_);
+          {src_dims}, MklDnnType<T>(), ort_source_format_);
       source_desc_ = ort_source_desc_;
     } else {
       x_shape = parents_[0].get()->primitive_dst_shape_;
@@ -75,7 +74,7 @@ class MklDnnSum : public MklDnnKernel {
         x_shape1 = TensorShape(xshape, xdim);
         mkldnn::memory::dims src_dims(
             x_shape1.GetDims().begin(), x_shape1.GetDims().end());
-        auto mpd = mkldnn::memory::desc({src_dims}, MklDnnType<T>(), source_format_);
+        auto mpd = mkldnn::memory::desc({src_dims}, MklDnnType<T>(), ort_source_format_);
         auto src_memory = mkldnn::memory(mpd, cpu_engine, nullptr);
         srcs_pd_.push_back(mpd);
         srcs_memory_.push_back(src_memory);

@@ -101,7 +101,7 @@ class MklDnnKernel {
 
   // input format.
   // It can be ORT format (nchw) or blocked memory format from parent node
-  mkldnn::memory::format_tag source_format_ = mkldnn::memory::format_tag::any;
+  // mkldnn::memory::format_tag source_format_ = mkldnn::memory::format_tag::any;
   mkldnn::memory::desc source_desc_ = mkldnn::memory::desc();
 
  protected:

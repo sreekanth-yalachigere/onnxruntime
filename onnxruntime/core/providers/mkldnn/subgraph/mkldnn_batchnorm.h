@@ -115,7 +115,6 @@ class MklDnnBatchNorm : public MklDnnKernel {
       auto xdim = tensor_shape.size();
       mkldnn::memory::dims dims(xdim);
       ort_source_format_ = GetSourceFormat(static_cast<int>(xdim));
-      source_format_ = ort_source_format_;
 
       x_shape = TensorShape(xshape, xdim);
 
@@ -123,10 +122,10 @@ class MklDnnBatchNorm : public MklDnnKernel {
           x_shape.GetDims().begin(), x_shape.GetDims().end());
 
       ort_source_desc_ = mkldnn::memory::desc(
-          {src_dims}, MklDnnType<T>(), source_format_);
+          {src_dims}, MklDnnType<T>(), ort_source_format_);
       source_desc_ = ort_source_desc_;
       src_md_.reset(new mkldnn::memory::desc(
-          {src_dims}, MklDnnType<T>(), source_format_));
+          {src_dims}, MklDnnType<T>(), ort_source_format_));
     } else {
       src_md_.reset(
           new mkldnn::memory::desc(parents_[0].get()->primitive_dst_desc_));

@@ -18,7 +18,7 @@ void MklDnnKernel::InitDstReorderOutput(mkldnn::engine& cpu_engine,
         primitive_dst_shape_.GetDims().begin(), primitive_dst_shape_.GetDims().end());
     mkldnn::memory::desc dst_des = mkldnn::memory::desc(dst_dims_mkl,
                                                         data_type, ort_source_format_);
-    reorder_dst_mem_to_.reset(new mkldnn::memory({dst_des, cpu_engine}));
+    reorder_dst_mem_to_.reset(new mkldnn::memory(dst_des, cpu_engine));
     net.push_back(mkldnn::reorder(*primitive_dst_mem_, *reorder_dst_mem_to_));
     net_args.push_back({{MKLDNN_ARG_FROM, *primitive_dst_mem_},
                         {MKLDNN_ARG_TO, *reorder_dst_mem_to_}});

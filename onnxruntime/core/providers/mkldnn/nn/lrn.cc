@@ -194,10 +194,10 @@ Status LRN<T>::Compute(OpKernelContext* context) const {
     //auto fwd_primitive_desc = lrn_primitive->GetPrimitiveDesc();
 
     //mkldnn::engine& cpu_engine = GetEngine();
-    mkldnn::memory::format_tag mem_format = dims_mkl.size() == 5 ? mkldnn::memory::format_tag::ncdhw : mkldnn::memory::format_tag::nchw;
+    // mkldnn::memory::format_tag mem_format = dims_mkl.size() == 5 ? mkldnn::memory::format_tag::ncdhw : mkldnn::memory::format_tag::nchw;
     // Per ONNX spec, X (src) is NCHW and Y (dst) is NCHW
-    auto src_md = mkldnn::memory::desc(dims_mkl, MklDnnType<T>(), mem_format);
-    auto dst_md = mkldnn::memory::desc(dims_mkl, MklDnnType<T>(), mem_format);
+    //auto src_md = mkldnn::memory::desc(dims_mkl, MklDnnType<T>(), mem_format);
+    //auto dst_md = mkldnn::memory::desc(dims_mkl, MklDnnType<T>(), mem_format);
 
     // Reorder src memory layout if necessary.
     //if (src_md.data.format != lrn_primitive->GetSrcMemoryFormat()) {

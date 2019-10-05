@@ -99,7 +99,6 @@ class MklDnnConv : public MklDnnKernel {
       auto xshape = tensor_shape.data();
       auto xdim = tensor_shape.size();
       ort_source_format_ = mkldnn::memory::format_tag::any;
-      source_format_ = mkldnn::memory::format_tag::any;
       x_shape = TensorShape(xshape, xdim);
     } else {
       // get the output of previous node (mkldnn block propagation).
@@ -107,7 +106,6 @@ class MklDnnConv : public MklDnnKernel {
       x_shape = parents_[0].get()->primitive_dst_shape_;
       ort_source_format_ = parents_[0].get()->ort_source_format_;
       ort_source_desc_ = parents_[0].get()->ort_source_desc_;
-      source_format_ = parents_[0].get()->source_format_;
       source_desc_ = parents_[0].get()->primitive_dst_desc_;
 
 	  mkldnn::memory::dims src_dims_mkl(x_shape.GetDims().begin(), x_shape.GetDims().end());
@@ -223,16 +221,13 @@ class MklDnnConv : public MklDnnKernel {
       }
     }
 
-	mkldnn::memory::dims src_dims_mkl(x_shape.GetDims().begin(), x_shape.GetDims().end());
-    if (source_format_ == mkldnn::memory::format_tag::any) {
-      source_format_ = src_format;
+    if (mklnode_ptr_->parent_nodes.empty()) {
+      mkldnn::memory::dims src_dims_mkl(x_shape.GetDims().begin(), x_shape.GetDims().end());
 
-      src_md_.reset(new mkldnn::memory::desc({src_dims_mkl}, MklDnnType<T>(), src_format));
-      src_mem_.reset(new mkldnn::memory(*src_md_, cpu_engine, nullptr));
-    }
-    if (ort_source_format_ == mkldnn::memory::format_tag::any) {
-      ort_source_format_ = src_format;
+	  ort_source_format_ = src_format;
+      src_md_.reset(new mkldnn::memory::desc({src_dims_mkl}, MklDnnType<T>(), mkldnn::memory::format_tag::any));
       ort_source_desc_ = mkldnn::memory::desc({src_dims_mkl}, MklDnnType<T>(), src_format);
+      source_desc_ = mkldnn::memory::desc({src_dims_mkl}, MklDnnType<T>(), src_format);
     }
 
     // Set the memory descriptors to format::any to allow MKLDNN to decide what the optimal memory layout should be
@@ -294,7 +289,7 @@ class MklDnnConv : public MklDnnKernel {
 
     if (primitive_src_desc_ != source_desc_) {
       mkldnn::memory::dims src_dims(x_shape.GetDims().begin(), x_shape.GetDims().end());
-      auto pd = mkldnn::memory::desc({{src_dims}, MklDnnType<T>(), source_format_});
+      auto pd = mkldnn::memory::desc({{src_dims}, MklDnnType<T>(), ort_source_format_});
 
       if (mklnode_ptr_->parent_nodes.empty())
         src_mem_from_.reset(new mkldnn::memory(pd, cpu_engine, nullptr));
