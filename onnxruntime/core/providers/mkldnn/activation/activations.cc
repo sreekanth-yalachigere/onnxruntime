@@ -38,7 +38,7 @@ class ReluPrimitive final : public PrimitiveBase {
  public:
   explicit ReluPrimitive(const ReluParams& params)
       : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
+    context_.stream.reset(new mkldnn::stream(cpu_engine_));
     if (context_.relu_fwd == nullptr) {
       Initialize(params);
     }
@@ -47,21 +47,23 @@ class ReluPrimitive final : public PrimitiveBase {
   ~ReluPrimitive() = default;
 
   void Compute(const T* src_data, T* dst_data) {
-	  context_.src_mem->set_data_handle(
-		  static_cast<void*>(const_cast<T*>(src_data)));
-	  context_.dst_mem->set_data_handle(
-		  static_cast<void*>(dst_data));
-	  context_.stream->submit(context_.net);
+    context_.src_mem->set_data_handle(
+        static_cast<void*>(const_cast<T*>(src_data)));
+    context_.dst_mem->set_data_handle(
+        static_cast<void*>(dst_data));
 
-	  context_.src_mem->set_data_handle(nullptr);
-	  context_.dst_mem->set_data_handle(nullptr);
-	  return;
+    context_.relu_fwd->execute(
+        *context_.stream,
+        {{MKLDNN_ARG_SRC, *context_.src_mem},
+         {MKLDNN_ARG_DST, *context_.dst_mem}});
+
+    context_.src_mem->set_data_handle(nullptr);
+    context_.dst_mem->set_data_handle(nullptr);
+    return;
   }
 
  private:
   struct ReluContext {
-    mkldnn::memory::format src_fmt;
-
     std::unique_ptr<mkldnn::memory> src_mem;
     std::unique_ptr<mkldnn::memory> dst_mem;
 
@@ -80,45 +82,58 @@ class ReluPrimitive final : public PrimitiveBase {
   };
 
   void Initialize(const ReluParams& params) {
-    
-    mkldnn::memory::format fmt = mkldnn::memory::format::any;
+    mkldnn::memory::format_tag fmt = mkldnn::memory::format_tag::any;
     switch (params.src_dims.size()) {
-    case 1: { fmt = mkldnn::memory::format::x; break; }
-    case 2: { fmt = mkldnn::memory::format::nc; break; }
-    case 3: { fmt = mkldnn::memory::format::ntc; break; }
-    case 4: { fmt = mkldnn::memory::format::nchw; break; }
-    case 5: { fmt = mkldnn::memory::format::ncdhw; break; }
-    default: {  fmt = mkldnn::memory::format::any; break; }
+      case 1: {
+        fmt = mkldnn::memory::format_tag::x;
+        break;
+      }
+      case 2: {
+        fmt = mkldnn::memory::format_tag::nc;
+        break;
+      }
+      case 3: {
+        fmt = mkldnn::memory::format_tag::ntc;
+        break;
+      }
+      case 4: {
+        fmt = mkldnn::memory::format_tag::nchw;
+        break;
+      }
+      case 5: {
+        fmt = mkldnn::memory::format_tag::ncdhw;
+        break;
+      }
+      default: {
+        fmt = mkldnn::memory::format_tag::any;
+        break;
+      }
     }
 
-    context_.src_md.reset(new mkldnn::memory::desc({ params.src_dims}, MklDnnType<T>(), fmt));
+    context_.src_md.reset(new mkldnn::memory::desc({params.src_dims}, MklDnnType<T>(), fmt));
 
     mkldnn::algorithm algo = mkldnn::algorithm::eltwise_relu;
     context_.fwd_desc.reset(new mkldnn::eltwise_forward::desc(
-      mkldnn::prop_kind::forward_inference, algo, *context_.src_md, 0));
+        mkldnn::prop_kind::forward_inference, algo, *context_.src_md, 0));
 
     context_.relu_fwd_pd.reset(new mkldnn::eltwise_forward::primitive_desc(
-      *context_.fwd_desc, cpu_engine_));
+        *context_.fwd_desc, cpu_engine_));
 
-    context_.src_fmt = static_cast<mkldnn::memory::format>(
-      context_.relu_fwd_pd.get()->src_primitive_desc().desc().data.format);
+    context_.src_size = context_.relu_fwd_pd.get()->src_desc().get_size();
+    context_.dst_size = context_.relu_fwd_pd.get()->dst_desc().get_size();
 
-    context_.src_size = context_.relu_fwd_pd.get()->src_primitive_desc().get_size();
-    context_.dst_size = context_.relu_fwd_pd.get()->dst_primitive_desc().get_size();
-
-    context_.src_mem.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->src_primitive_desc(), nullptr));
-    context_.dst_mem.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->dst_primitive_desc(), nullptr));
+    context_.src_mem.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->src_desc(), cpu_engine_, nullptr));
+    context_.dst_mem.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->dst_desc(), cpu_engine_, nullptr));
     context_.relu_fwd.reset(
-      new mkldnn::eltwise_forward(*context_.relu_fwd_pd, *context_.src_mem, *context_.dst_mem));
-    context_.net.push_back(*context_.relu_fwd);
+        new mkldnn::eltwise_forward(*context_.relu_fwd_pd));
   }
 
   ReluContext context_;
   mkldnn::engine& cpu_engine_;
 };
 
-// Pool which allows for reuse of MKLDNN Relu primitives which are expensive 
-// to instantiate. To address thread safety, the primitives are stored in a map 
+// Pool which allows for reuse of MKLDNN Relu primitives which are expensive
+// to instantiate. To address thread safety, the primitives are stored in a map
 // on thread local storage.
 template <typename T>
 class ReluPrimitivePool : public PrimitivePool<T> {
@@ -130,8 +145,8 @@ class ReluPrimitivePool : public PrimitivePool<T> {
     if (primitive == nullptr) {
       auto relu_primitive = onnxruntime::make_unique<ReluPrimitive<T>>(params);
       primitive = relu_primitive.get();
-      ReluPrimitivePool<T>::GetInstance().SetPrimitive(params.ToString(), 
-		std::move(relu_primitive));
+      ReluPrimitivePool<T>::GetInstance().SetPrimitive(params.ToString(),
+                                                       std::move(relu_primitive));
     }
     return primitive;
   }
@@ -145,17 +160,17 @@ class ReluPrimitivePool : public PrimitivePool<T> {
     return pool;
   }
 };
-}	// namespace
+}  // namespace
 
 template <typename T>
 Status Relu<T>::Compute(OpKernelContext* context) const {
   const Tensor* X = context->Input<Tensor>(0);
   Tensor* Y = context->Output(0, X->Shape());
-  
+
   const TensorShape& x_shape = X->Shape();
   const auto& x_dims = x_shape.GetDims();
-  
-  if (X->Shape().NumDimensions() > 5 ) {
+
+  if (X->Shape().NumDimensions() > 5) {
     // Fall Back to CPU implementation.
     // mkldnn support up to dim of size 5
     return onnxruntime::Relu<T>::Compute(context);
@@ -169,15 +184,15 @@ Status Relu<T>::Compute(OpKernelContext* context) const {
 
   mkldnn::memory::dims src_dims_mkl(x_dims.begin(), x_dims.end());
   mkldnn::memory::dims dst_dims_mkl(y_dims.begin(), y_dims.end());
-  
+
   try {
     ReluParams pool_params(src_dims_mkl, dst_dims_mkl);
     ReluPrimitive<T>* relu_primitive = ReluPrimitivePool<T>::Get(pool_params);
 
     relu_primitive->Compute(src_data, dst_data);
   } catch (const mkldnn::error& e) {
-    return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Status: ", e.status, 
-		", message: ", e.message.c_str());
+    return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Status: ", e.status,
+                           ", message: ", e.what());
   }
 
   return Status::OK();

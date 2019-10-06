@@ -150,8 +150,7 @@ class MKLDNNExecutionProvider : public IExecutionProvider {
   mutable int subgraph_index_ = 0;
 
   // supported MklDnn Operators
-  std::set<std::string> mkldnn_ops_ = {"Conv", "BatchNormalization", "Relu", "Sum",
-                                       "AveragePool", "GlobalMaxPool", "GlobalAveragePool", "MaxPool", "LRN"};
+  std::set<std::string> mkldnn_ops_ = {"Conv"};
 
   mutable std::unordered_map<std::string, std::shared_ptr<mkl_dnn::Subgraph>> mkl_subgraphs_;
 };

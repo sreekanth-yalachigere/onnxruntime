@@ -53,7 +53,7 @@ class LRNPrimitive : public PrimitiveBase {
  public:
   explicit LRNPrimitive(const LRNParams& params)
       : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(mkldnn::stream::kind::eager));
+    context_.stream.reset(new mkldnn::stream(cpu_engine_));
     if (context_.lrn_fwd == nullptr) {
       Initialize(params);
     }
@@ -64,14 +64,18 @@ class LRNPrimitive : public PrimitiveBase {
   void Compute(const T* src_data, T* dst_data) {
     context_.src_mem->set_data_handle(static_cast<void*>(const_cast<T*>(src_data)));
     context_.dst_mem->set_data_handle(static_cast<void*>(dst_data));
-    context_.stream->submit(context_.net);
+
+	context_.lrn_fwd->execute(
+        *context_.stream,
+        {{MKLDNN_ARG_SRC, *context_.src_mem},
+         {MKLDNN_ARG_DST, *context_.dst_mem}});
 
     context_.src_mem->set_data_handle(nullptr);
     context_.dst_mem->set_data_handle(nullptr);
     return;
   }
 
-  mkldnn::memory::format GetSrcMemoryFormat() const { return context_.src_fmt; }
+  mkldnn::memory::format_tag GetSrcMemoryFormat() const { return context_.src_fmt; }
 
   size_t GetSrcSize() const { return context_.src_size; }
 
@@ -83,7 +87,7 @@ class LRNPrimitive : public PrimitiveBase {
 
  private:
   struct LRNContext {
-    mkldnn::memory::format src_fmt;
+    mkldnn::memory::format_tag src_fmt;
     std::unique_ptr<mkldnn::memory::desc> src_md;
 
     size_t src_size;
@@ -100,7 +104,7 @@ class LRNPrimitive : public PrimitiveBase {
     std::vector<mkldnn::primitive> net;
 
     LRNContext()
-        : src_fmt(mkldnn::memory::format::any),
+        : src_fmt(mkldnn::memory::format_tag::any),
           src_md(nullptr),
           src_size(0),
           dst_size(0),
@@ -113,7 +117,7 @@ class LRNPrimitive : public PrimitiveBase {
   };
 
   void Initialize(const LRNParams& params) {
-    context_.src_md.reset(new mkldnn::memory::desc({params.dims_}, MklDnnType<T>(), mkldnn::memory::format::nchw));
+    context_.src_md.reset(new mkldnn::memory::desc({params.dims_}, MklDnnType<T>(), mkldnn::memory::format_tag::nchw));
 
     mkldnn::algorithm algo = mkldnn::algorithm::lrn_across_channels;
     context_.fwd_desc.reset(new mkldnn::lrn_forward::desc(
@@ -123,17 +127,13 @@ class LRNPrimitive : public PrimitiveBase {
     context_.fwd_primitive_desc.reset(new mkldnn::lrn_forward::primitive_desc(
         *context_.fwd_desc, cpu_engine_));
 
-    context_.src_fmt = static_cast<mkldnn::memory::format>(
-        context_.fwd_primitive_desc.get()->src_primitive_desc().desc().data.format);
+    context_.src_size = context_.fwd_primitive_desc.get()->src_desc().get_size();
+    context_.dst_size = context_.fwd_primitive_desc.get()->dst_desc().get_size();
 
-    context_.src_size = context_.fwd_primitive_desc.get()->src_primitive_desc().get_size();
-    context_.dst_size = context_.fwd_primitive_desc.get()->dst_primitive_desc().get_size();
-
-    context_.src_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->src_primitive_desc(), nullptr));
-    context_.dst_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->dst_primitive_desc(), nullptr));
+    context_.src_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->src_desc(), cpu_engine_, nullptr));
+    context_.dst_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->dst_desc(), cpu_engine_, nullptr));
     context_.lrn_fwd.reset(
-        new mkldnn::lrn_forward(*context_.fwd_primitive_desc, *context_.src_mem, *context_.dst_mem));
-    context_.net.push_back(*context_.lrn_fwd);
+		new mkldnn::lrn_forward(*context_.fwd_primitive_desc));
   }
 
   LRNContext context_;
@@ -191,47 +191,47 @@ Status LRN<T>::Compute(OpKernelContext* context) const {
   try {
     LRNParams lrn_params(dims_mkl, this->alpha_, this->beta_, this->bias_, this->size_);
     LRNPrimitive<T>* lrn_primitive = LRNPrimitivePool<T>::Get(lrn_params);
-    auto fwd_primitive_desc = lrn_primitive->GetPrimitiveDesc();
+    //auto fwd_primitive_desc = lrn_primitive->GetPrimitiveDesc();
 
-    mkldnn::engine& cpu_engine = GetEngine();
-    mkldnn::memory::format mem_format = dims_mkl.size() == 5 ? mkldnn::memory::format::ncdhw : mkldnn::memory::format::nchw;
+    //mkldnn::engine& cpu_engine = GetEngine();
+    // mkldnn::memory::format_tag mem_format = dims_mkl.size() == 5 ? mkldnn::memory::format_tag::ncdhw : mkldnn::memory::format_tag::nchw;
     // Per ONNX spec, X (src) is NCHW and Y (dst) is NCHW
-    auto src_md = mkldnn::memory::desc(dims_mkl, MklDnnType<T>(), mem_format);
-    auto dst_md = mkldnn::memory::desc(dims_mkl, MklDnnType<T>(), mem_format);
+    //auto src_md = mkldnn::memory::desc(dims_mkl, MklDnnType<T>(), mem_format);
+    //auto dst_md = mkldnn::memory::desc(dims_mkl, MklDnnType<T>(), mem_format);
 
     // Reorder src memory layout if necessary.
-    if (src_md.data.format != lrn_primitive->GetSrcMemoryFormat()) {
-      auto pd = mkldnn::memory::primitive_desc(src_md, cpu_engine);
-      mkldnn::memory src = mkldnn::memory(pd, (void*)src_data);
-      // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
-      // mkldnn using padding to allow use of blocked format.
-      src_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, lrn_primitive->GetSrcSize());
-      mkldnn::memory dst = mkldnn::memory(fwd_primitive_desc->src_primitive_desc(), src_reorder_buffer.get());
-      MemoryReorderParams params(src, dst);
-      DoReorder<T>(params);
-      src_data = static_cast<T*>(dst.get_data_handle());
-    }
+    //if (src_md.data.format != lrn_primitive->GetSrcMemoryFormat()) {
+    //  //auto pd = mkldnn::memory::primitive_desc(src_md, cpu_engine);
+    //  //mkldnn::memory src = mkldnn::memory(pd, (void*)src_data);
+    //  // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
+    //  // mkldnn using padding to allow use of blocked format.
+    //  src_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, lrn_primitive->GetSrcSize());
+    //  //mkldnn::memory dst = mkldnn::memory(fwd_primitive_desc->src_primitive_desc(), src_reorder_buffer.get());
+    //  MemoryReorderParams params(src, dst);
+    //  DoReorder<T>(params);
+    //  src_data = static_cast<T*>(dst.get_data_handle());
+    //}
 
     // Allocate dst buffer if reorder is necessary
-    if (src_md.data.format != lrn_primitive->GetSrcMemoryFormat()) {
-      // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
-      // mkldnn using padding to allow use of blocked format.
-      dst_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, lrn_primitive->GetDstSize());
-      dst_data = static_cast<T*>(dst_reorder_buffer.get());
-    }
+    //if (src_md.data.format != lrn_primitive->GetSrcMemoryFormat()) {
+    //  // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
+    //  // mkldnn using padding to allow use of blocked format.
+    //  dst_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, lrn_primitive->GetDstSize());
+    //  dst_data = static_cast<T*>(dst_reorder_buffer.get());
+    //}
 
     lrn_primitive->Compute(src_data, dst_data);
 
     // Reorder dst memory layout if necessary
-    if (src_md.data.format != lrn_primitive->GetSrcMemoryFormat()) {
-      mkldnn::memory src = mkldnn::memory(fwd_primitive_desc->dst_primitive_desc(), (void*)dst_data);
-      auto pd = mkldnn::memory::primitive_desc(dst_md, cpu_engine);
-      mkldnn::memory dst = mkldnn::memory(pd, Y->template MutableData<T>());
-      MemoryReorderParams params(src, dst);
-      DoReorder<T>(params);
-    }
+    //if (src_md.data.format != lrn_primitive->GetSrcMemoryFormat()) {
+    //  mkldnn::memory src = mkldnn::memory(fwd_primitive_desc->dst_primitive_desc(), (void*)dst_data);
+    //  //auto pd = mkldnn::memory::primitive_desc(dst_md, cpu_engine);
+    //  mkldnn::memory dst = mkldnn::memory(pd, Y->template MutableData<T>());
+    //  MemoryReorderParams params(src, dst);
+    //  DoReorder<T>(params);
+    //}
   } catch (const mkldnn::error& e) {
-    return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Status: ", e.status, ", message: ", e.message.c_str());
+    return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Status: ", e.status, ", message: ", e.what());
   }
 
   return Status::OK();
