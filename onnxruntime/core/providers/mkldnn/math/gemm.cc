@@ -78,14 +78,12 @@ Status Gemm<float>::Compute(OpKernelContext* ctx) const {
     }
   }
 
-  // mkldnn_sgemm expects col major matrices, so we need to swap the operands A and B
-  auto status = mkldnn_sgemm(trans_B_ ? 'T' : 'N',
-                             trans_A_ ? 'T' : 'N',
-                             N, M, K,
-                             alpha_, W->template Data<float>(),
-                             trans_B_ ? K : N,
-                             X->template Data<float>(),
-                             trans_A_ ? M : K,
+  // mkldnn_sgemm expects row major matrices, so no need to swap the operands A and B
+  auto status = mkldnn_sgemm(trans_A_ ? 'T' : 'N',
+                             trans_B_ ? 'T' : 'N',
+                             M, N, K,
+                             alpha_, X->template Data<float>() , trans_A_ ? M : K,
+                             W->template Data<float>(), trans_B_ ? K : N,
                              beta_, Y->template MutableData<float>(), N);
   if (status == mkldnn_success) {
     return Status::OK();
