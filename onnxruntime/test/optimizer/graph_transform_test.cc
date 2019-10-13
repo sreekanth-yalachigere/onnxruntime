@@ -37,7 +37,7 @@ using namespace ONNX_NAMESPACE;
 namespace onnxruntime {
 namespace test {
 
-static const std::string MODEL_FOLDER = "testdata/transform/";
+static const std::string MODEL_FOLDER = "C:/repos/mkldnn/onnxruntime/build/Windows/Debug/Debug/testdata/transform/";
 
 TEST(GraphTransformationTests, IdentityElimination) {
   string model_uri = MODEL_FOLDER + "abs-id-max.onnx";

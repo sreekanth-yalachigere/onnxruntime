@@ -10,6 +10,7 @@
 #include "core/providers/mkldnn/mkldnn_common.h"
 #include "core/providers/mkldnn/subgraph/mkldnn_conv.h"
 #include "core/providers/mkldnn/subgraph/mkldnn_batchnorm.h"
+#include "core/providers/mkldnn/subgraph/mkldnn_conv_batchnorm.h"
 #include "core/providers/mkldnn/subgraph/mkldnn_activations.h"
 #include "core/providers/mkldnn/subgraph/mkldnn_pool.h"
 #include "core/providers/mkldnn/subgraph/mkldnn_sum.h"
@@ -104,6 +105,25 @@ class SubgraphPrimitive : public PrimitiveBase {
         os << "BatchNormalization-" << mkldnn_node.node_index << "-";
         std::shared_ptr<MklDnnBatchNorm<T>> kernel;
         kernel.reset(new MklDnnBatchNorm<T>(mkldnn_node, params.provider, params.attributes, os.str()));
+        kernel->fuse_relu_ = true;
+        for (auto index : mkldnn_node.parent_nodes) {
+          kernel->parents_.push_back(context_.kernels[index]);
+        }
+        context_.kernels.push_back(kernel);
+      } else if (mkldnn_node.name == "Conv-BatchNormalization") {
+        std::ostringstream os;
+        os << "Conv-" << mkldnn_node.node_index << "-";
+        std::shared_ptr<MklDnnConvBatchNorm<T>> kernel;
+        kernel.reset(new MklDnnConvBatchNorm<T>(mkldnn_node, params.provider, params.attributes, os.str()));
+        for (auto index : mkldnn_node.parent_nodes) {
+          kernel->parents_.push_back(context_.kernels[index]);
+        }
+        context_.kernels.push_back(kernel);
+      } else if (mkldnn_node.name == "Conv-BatchNormalization-Relu") {
+        std::ostringstream os;
+        os << "Conv-" << mkldnn_node.node_index << "-";
+        std::shared_ptr<MklDnnConvBatchNorm<T>> kernel;
+        kernel.reset(new MklDnnConvBatchNorm<T>(mkldnn_node, params.provider, params.attributes, os.str()));
         kernel->fuse_relu_ = true;
         for (auto index : mkldnn_node.parent_nodes) {
           kernel->parents_.push_back(context_.kernels[index]);

@@ -150,6 +150,8 @@ void MKLDNNExecutionProvider::CreateOrUpdateMklDnnNode(const Node* node,
     const auto& node_outputs = node->OutputDefs();
     mkldnn_node.output_name = node_outputs[0]->Name();
     if (node->OpType() == "Conv") {
+      if (node->InputDefs().size() == 3)
+        mkldnn_node.conv_bias = true;
       mkldnn_node.weight_name = node->InputDefs()[1]->Name();
     }
     for (size_t i = 0; i < node_inputs.size(); i++) {
@@ -160,6 +162,7 @@ void MKLDNNExecutionProvider::CreateOrUpdateMklDnnNode(const Node* node,
     subgraph_ptr->mkldnn_nodes.push_back(mkldnn_node);
     output_to_source_node_map.insert(std::make_pair(node_outputs[0]->Name(), subgraph_ptr->mkldnn_nodes.size() - 1));
   } else {
+    subgraph_ptr->mkldnn_nodes.back().num_inputs += static_cast<int>(node->InputDefs().size() - 1);
     const auto& node_outputs = node->OutputDefs();
     output_to_source_node_map.erase(subgraph_ptr->mkldnn_nodes.back().output_name);
     subgraph_ptr->mkldnn_nodes.back().output_name = node_outputs[0]->Name();
@@ -182,9 +185,17 @@ void MKLDNNExecutionProvider::CreateOrUpdateMklDnnNode(const Node* node,
   NodeAttributes attributes = node->GetAttributes();
   if (attributes.size() > 0) {
     size_t index = subgraph_ptr->mkldnn_nodes.size();
+    std::string op_name;
+    if (fused) {
+      for (auto iter = node->InputNodesBegin(); iter != node->InputNodesEnd(); ++iter) {
+        op_name = (*iter).OpType();
+      }
+    } else {
+      op_name = node->OpType();
+    }
 
     for (auto att_it = attributes.begin(); att_it != attributes.end(); ++att_it) {
-      std::string key = node->OpType() + "-" + std::to_string(index) + "-" + att_it->first;
+      std::string key = op_name + "-" + std::to_string(index) + "-" + att_it->first;
       std::pair<std::string, ONNX_NAMESPACE::AttributeProto> att(key, att_it->second);
       subgraph_attributes[key] = att_it->second;
     }
@@ -244,8 +255,14 @@ std::vector<std::unique_ptr<ComputeCapability>> MKLDNNExecutionProvider::GetCapa
 
       // can we fuse (at mkldnn level) nodes?
       bool fused = false;
+      if (sub_var.subgraph_node_indexes.size() > 1 && node->OpType() == "BatchNormalization") {
+        if (subgraph_ptr->mkldnn_nodes.back().name == "Conv") {
+          subgraph_ptr->mkldnn_nodes.back().name += "-BatchNormalization";
+          fused = true;
+        }
+      }
       if (sub_var.subgraph_node_indexes.size() > 1 && node->OpType() == "Relu") {
-        if (subgraph_ptr->mkldnn_nodes.back().name == "BatchNormalization" || subgraph_ptr->mkldnn_nodes.back().name == "Conv") {
+        if (subgraph_ptr->mkldnn_nodes.back().name == "Conv-BatchNormalization" || subgraph_ptr->mkldnn_nodes.back().name == "BatchNormalization" || subgraph_ptr->mkldnn_nodes.back().name == "Conv") {
           subgraph_ptr->mkldnn_nodes.back().name += "-Relu";
           fused = true;
         }

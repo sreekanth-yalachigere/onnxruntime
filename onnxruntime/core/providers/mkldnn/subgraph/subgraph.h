@@ -17,6 +17,7 @@ struct MklDnnNode {
   int node_index = -1;
   int input_start_index = -1;  // start index in inputs()
   int num_inputs = 0;          // and how many inputs
+  bool conv_bias = false;
   int output_index = -1;       // index in output()
   std::string weight_name;
   std::string output_name;

@@ -37,11 +37,25 @@ class MklDnnKernel {
     ORT_UNUSED_PARAMETER(context);
     ORT_UNUSED_PARAMETER(cpu_engine);
   }
+  
   virtual void SetProvider(MKLDNNExecutionProvider* provider) {
     provider_ = provider;
   }
+  
   MKLDNNExecutionProvider* GetProvider() {
     return provider_;
+  }
+
+  TensorShape GetShape(const OrtCustomOpApi* api, OrtKernelContext* context, int input_index) {
+    Ort::CustomOpApi ort{*api};
+    const OrtValue* input_tensor = ort.KernelContext_GetInput(context, input_index + 1);
+    auto tensor_info = ort.GetTensorTypeAndShape(input_tensor);
+    auto tensor_shape = ort.GetTensorShape(tensor_info);
+    ort.ReleaseTensorTypeAndShapeInfo(tensor_info);
+    auto xshape = tensor_shape.data();
+    auto xdim = tensor_shape.size();
+    TensorShape shape(xshape, xdim);
+    return shape;
   }
 
   virtual Status Bind(const OrtCustomOpApi* api, OrtKernelContext* context) = 0;
