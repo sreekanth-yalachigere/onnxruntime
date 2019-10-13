@@ -328,7 +328,7 @@ class MklDnnConvBatchNorm : public MklDnnKernel {
 
   void WeightsScaleByAxix(const OrtCustomOpApi* api, OrtKernelContext* context,
                           std::vector<float>& weights_scaled, std::vector<float> inv_scale,
-                          TensorShape& W, size_t O) {
+                          TensorShape& W) {
     Ort::CustomOpApi ort{*api};
     int input_index = mklnode_ptr_->input_start_index < 0 ? 0 : mklnode_ptr_->input_start_index;
     const OrtValue* input_tensor = ort.KernelContext_GetInput(context, input_index + 1);
@@ -395,7 +395,7 @@ class MklDnnConvBatchNorm : public MklDnnKernel {
     weights_scaled_by_axis.assign(static_cast<size_t>(O), 0.0f);
     auto w_size = std::accumulate(w_dims.begin(), w_dims.end(), static_cast<int64_t>(1), std::multiplies<int64_t>{});
     weights_scaled_by_axis.assign(static_cast<size_t>(w_size), 0.0f);
-    WeightsScaleByAxix(api, context, weights_scaled_by_axis, inv_scale_factor, W, O);
+    WeightsScaleByAxix(api, context, weights_scaled_by_axis, inv_scale_factor, W);
 
     {
       // lock to make sure reordering is done only once
