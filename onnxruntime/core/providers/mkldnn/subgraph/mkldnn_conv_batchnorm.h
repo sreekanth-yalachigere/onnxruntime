@@ -321,7 +321,7 @@ class MklDnnConvBatchNorm : public MklDnnKernel {
     inv_scale.assign(static_cast<size_t>(O), 0.0f);
 
     float* data = inv_scale_factor.data();
-    for (int i = 0; i < O; i++) {
+    for (size_t i = 0; i < O; i++) {
       data[i] = bn_scale_data[i] / std::sqrt(bn_var_data[i] + epsilon_);
     }
   }
@@ -356,7 +356,7 @@ class MklDnnConvBatchNorm : public MklDnnKernel {
     int64_t n = w_size / num;
 
     float* w_scale_data = weights_scaled.data();
-    for (int i = 0; i < n; i++) {
+    for (auto i = 0; i < n; i++) {
       int index = bn_scale_size == 1 ? 0 : i;
       for (int64_t j = 0; j < num; j++) {
         w_scale_data[i * num + j] = filter_data[i * num + j] * inv_scale[index];
