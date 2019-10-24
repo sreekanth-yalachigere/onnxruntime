@@ -53,12 +53,17 @@ struct BatchNormParams {
   }
 };
 
+static mkldnn::engine& GetGpuEngine() {
+  static mkldnn::engine engine = mkldnn::engine(mkldnn::engine::kind::gpu, 0);
+  return engine;
+}
+
 template <typename T>
 class BatchNormPrimitive final : public PrimitiveBase {
  public:
   explicit BatchNormPrimitive(const BatchNormParams& params)
-      : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(cpu_engine_));
+      : cpu_engine_(GetEngine()), gpu_engine_(GetGpuEngine()) {
+    context_.stream.reset(new mkldnn::stream(gpu_engine_));
     if (context_.batchnorm_fwd == nullptr) {
       Initialize(params);
     }
@@ -86,13 +91,24 @@ class BatchNormPrimitive final : public PrimitiveBase {
     MEMCPY_S(scale_shift_buf, scale_data, src_bytes, dst_bytes);
     MEMCPY_S(&scale_shift_buf[scale_dims_channels], b_data, src_bytes, dst_bytes);
 
+	mkldnn::reorder(*context_.src_mem, *context_.gpu_src_mem).execute(*context_.stream, *context_.src_mem, *context_.gpu_src_mem);
+    mkldnn::reorder(*context_.mean_mem, *context_.gpu_mean_mem).execute(*context_.stream, *context_.mean_mem, *context_.gpu_mean_mem);
+    mkldnn::reorder(*context_.var_mem, *context_.gpu_var_mem).execute(*context_.stream, *context_.var_mem, *context_.gpu_var_mem);
+    mkldnn::reorder(*context_.scale_shift_mem, *context_.gpu_scale_shift_mem).execute(*context_.stream, *context_.scale_shift_mem, *context_.gpu_scale_shift_mem);
+    mkldnn::reorder(*context_.dst_mem, *context_.gpu_dst_mem).execute(*context_.stream, *context_.dst_mem, *context_.gpu_dst_mem);
+
+
+
     context_.net[0].execute(
         *context_.stream,
-        {{MKLDNN_ARG_SRC, *context_.src_mem},
-         {MKLDNN_ARG_MEAN, *context_.mean_mem},
-         {MKLDNN_ARG_VARIANCE, *context_.var_mem},
-         {MKLDNN_ARG_SCALE_SHIFT, *context_.scale_shift_mem},
-         {MKLDNN_ARG_DST, *context_.dst_mem}});
+        {{MKLDNN_ARG_SRC, *context_.gpu_src_mem},
+         {MKLDNN_ARG_MEAN, *context_.gpu_mean_mem},
+         {MKLDNN_ARG_VARIANCE, *context_.gpu_var_mem},
+         {MKLDNN_ARG_SCALE_SHIFT, *context_.gpu_scale_shift_mem},
+         {MKLDNN_ARG_DST, *context_.gpu_dst_mem}});
+
+    mkldnn::reorder(*context_.gpu_dst_mem, *context_.dst_mem).execute(*context_.stream, *context_.gpu_dst_mem, *context_.dst_mem);
+
 
     return;
   }
@@ -109,6 +125,12 @@ class BatchNormPrimitive final : public PrimitiveBase {
     std::unique_ptr<mkldnn::memory> mean_mem;
     std::unique_ptr<mkldnn::memory> var_mem;
     std::unique_ptr<mkldnn::memory> dst_mem;
+
+	std::unique_ptr<mkldnn::memory> gpu_src_mem;
+    std::unique_ptr<mkldnn::memory> gpu_scale_shift_mem;
+    std::unique_ptr<mkldnn::memory> gpu_mean_mem;
+    std::unique_ptr<mkldnn::memory> gpu_var_mem;
+    std::unique_ptr<mkldnn::memory> gpu_dst_mem;
 
     std::unique_ptr<mkldnn::memory::desc> src_md;
     std::unique_ptr<mkldnn::memory::desc> scale_shift_md;
@@ -167,16 +189,25 @@ class BatchNormPrimitive final : public PrimitiveBase {
 
     context_.src_mem.reset(
         new mkldnn::memory(*context_.src_md, cpu_engine_, nullptr));
+    context_.gpu_src_mem.reset(
+        new mkldnn::memory(*context_.src_md, gpu_engine_));
 
     // scale_shift_mem will allocate 2*C*sizeof(float) buffer
     //
     context_.scale_shift_mem.reset(
         new mkldnn::memory({*context_.scale_shift_md, cpu_engine_}));
+    context_.gpu_scale_shift_mem.reset(
+        new mkldnn::memory({*context_.scale_shift_md, gpu_engine_}));
 
     context_.mean_mem.reset(
         new mkldnn::memory(*context_.mean_md, cpu_engine_, nullptr));
     context_.var_mem.reset(
         new mkldnn::memory(*context_.var_md, cpu_engine_, nullptr));
+
+	context_.gpu_mean_mem.reset(
+        new mkldnn::memory(*context_.mean_md, gpu_engine_));
+    context_.gpu_var_mem.reset(
+        new mkldnn::memory(*context_.var_md, gpu_engine_));
 
     context_.batchnorm_fwd.reset(new mkldnn::batch_normalization_forward::desc(
         mkldnn::prop_kind::forward_inference, *context_.src_md, params.epsilon,
@@ -185,10 +216,12 @@ class BatchNormPrimitive final : public PrimitiveBase {
 
     context_.batchnorm_fwd_pd.reset(
         new mkldnn::batch_normalization_forward::primitive_desc(
-            *context_.batchnorm_fwd, cpu_engine_));
+            *context_.batchnorm_fwd, gpu_engine_));
 
     context_.dst_mem.reset(new mkldnn::memory(
         context_.batchnorm_fwd_pd->dst_desc(), cpu_engine_, nullptr));
+    context_.gpu_dst_mem.reset(new mkldnn::memory(
+        context_.batchnorm_fwd_pd->dst_desc(), gpu_engine_));
 
     auto bn = mkldnn::batch_normalization_forward(*context_.batchnorm_fwd_pd);
 
@@ -197,6 +230,7 @@ class BatchNormPrimitive final : public PrimitiveBase {
 
   BatchNormContext context_;
   mkldnn::engine& cpu_engine_;
+  mkldnn::engine& gpu_engine_;
 };
 
 // Pool which allows for reuse of MKLDNN BatchNorm primitives which are

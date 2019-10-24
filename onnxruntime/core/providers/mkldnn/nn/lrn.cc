@@ -48,12 +48,17 @@ struct LRNParams {
   }
 };
 
+static mkldnn::engine& GetGpuEngine() {
+  static mkldnn::engine engine = mkldnn::engine(mkldnn::engine::kind::gpu, 0);
+  return engine;
+}
+
 template <typename T>
 class LRNPrimitive : public PrimitiveBase {
  public:
   explicit LRNPrimitive(const LRNParams& params)
-      : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(cpu_engine_));
+      : cpu_engine_(GetEngine()), gpu_engine_(GetGpuEngine()) {
+    context_.stream.reset(new mkldnn::stream(gpu_engine_));
     if (context_.lrn_fwd == nullptr) {
       Initialize(params);
     }
@@ -65,10 +70,15 @@ class LRNPrimitive : public PrimitiveBase {
     context_.src_mem->set_data_handle(static_cast<void*>(const_cast<T*>(src_data)));
     context_.dst_mem->set_data_handle(static_cast<void*>(dst_data));
 
+	mkldnn::reorder(*context_.src_mem, *context_.gpu_src_mem).execute(*context_.stream, *context_.src_mem, *context_.gpu_src_mem);
+
 	context_.lrn_fwd->execute(
         *context_.stream,
-        {{MKLDNN_ARG_SRC, *context_.src_mem},
-         {MKLDNN_ARG_DST, *context_.dst_mem}});
+        {{MKLDNN_ARG_SRC, *context_.gpu_src_mem},
+         {MKLDNN_ARG_DST, *context_.gpu_dst_mem}});
+
+	mkldnn::reorder(*context_.gpu_dst_mem, *context_.dst_mem).execute(*context_.stream, *context_.gpu_dst_mem, *context_.dst_mem);
+
 
     context_.src_mem->set_data_handle(nullptr);
     context_.dst_mem->set_data_handle(nullptr);
@@ -95,6 +105,8 @@ class LRNPrimitive : public PrimitiveBase {
 
     std::unique_ptr<mkldnn::memory> src_mem;
     std::unique_ptr<mkldnn::memory> dst_mem;
+    std::unique_ptr<mkldnn::memory> gpu_src_mem;
+    std::unique_ptr<mkldnn::memory> gpu_dst_mem;
 
     std::unique_ptr<mkldnn::lrn_forward::desc> fwd_desc;
     std::unique_ptr<mkldnn::lrn_forward::primitive_desc> fwd_primitive_desc;
@@ -110,6 +122,8 @@ class LRNPrimitive : public PrimitiveBase {
           dst_size(0),
           src_mem(nullptr),
           dst_mem(nullptr),
+          gpu_src_mem(nullptr),
+          gpu_dst_mem(nullptr),
           fwd_desc(nullptr),
           fwd_primitive_desc(nullptr),
           lrn_fwd(nullptr),
@@ -125,19 +139,24 @@ class LRNPrimitive : public PrimitiveBase {
         params.size_, params.alpha_, params.beta_, params.bias_));
 
     context_.fwd_primitive_desc.reset(new mkldnn::lrn_forward::primitive_desc(
-        *context_.fwd_desc, cpu_engine_));
+        *context_.fwd_desc, gpu_engine_));
 
     context_.src_size = context_.fwd_primitive_desc.get()->src_desc().get_size();
     context_.dst_size = context_.fwd_primitive_desc.get()->dst_desc().get_size();
 
     context_.src_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->src_desc(), cpu_engine_, nullptr));
     context_.dst_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->dst_desc(), cpu_engine_, nullptr));
+
+	context_.gpu_src_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->src_desc(), gpu_engine_));
+    context_.gpu_dst_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->dst_desc(), gpu_engine_));
+
     context_.lrn_fwd.reset(
 		new mkldnn::lrn_forward(*context_.fwd_primitive_desc));
   }
 
   LRNContext context_;
   mkldnn::engine& cpu_engine_;
+  mkldnn::engine& gpu_engine_;
 };
 
 // Pool which allows for reuse of MKLDNN Pool primitives which are expensive to instantiate.

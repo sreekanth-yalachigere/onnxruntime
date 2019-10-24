@@ -41,12 +41,17 @@ struct SumParams {
   }
 };
 
+static mkldnn::engine& GetGpuEngine() {
+  static mkldnn::engine engine = mkldnn::engine(mkldnn::engine::kind::gpu, 0);
+  return engine;
+}
+
 template <typename T>
 class SumPrimitive final : public PrimitiveBase {
  public:
   explicit SumPrimitive(const SumParams& params)
-      : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(cpu_engine_));
+      : cpu_engine_(GetEngine()), gpu_engine_(GetGpuEngine()) {
+    context_.stream.reset(new mkldnn::stream(gpu_engine_));
     if (context_.sum_pd == nullptr) {
       Initialize(params);
     }
@@ -67,16 +72,24 @@ class SumPrimitive final : public PrimitiveBase {
       const T* src_data = X->template Data<T>();
       context_.srcs_memory[i].set_data_handle(
           static_cast<void*>(const_cast<T*>(src_data)));
+     
+	  mkldnn::reorder(context_.srcs_memory[i], context_.gpu_srcs_memory[i]).execute(*context_.stream, context_.srcs_memory[i], context_.gpu_srcs_memory[i]);
     }
 
+    mkldnn::reorder(*context_.dst_mem, *context_.gpu_dst_mem).execute(*context_.stream, *context_.dst_mem, *context_.gpu_dst_mem);
+
+
     std::unordered_map<int, mkldnn::memory> args{
-        {MKLDNN_ARG_DST, *context_.dst_mem}};
+        {MKLDNN_ARG_DST, *context_.gpu_dst_mem}};
     for (int i = 0; i < (int)numinputs; i++) {
-      args.insert({MKLDNN_ARG_MULTIPLE_SRC + i, context_.srcs_memory[i]});
+      args.insert({MKLDNN_ARG_MULTIPLE_SRC + i, context_.gpu_srcs_memory[i]});
     }
 
     context_.net[0].execute(
         *context_.stream, args);
+
+	mkldnn::reorder(*context_.gpu_dst_mem, *context_.dst_mem).execute(*context_.stream, *context_.gpu_dst_mem, *context_.dst_mem);
+
 
     //for (int i = 0; i < numinputs; i++) {
     //  context_.srcs_memory[i].set_data_handle(nullptr);
@@ -99,6 +112,9 @@ class SumPrimitive final : public PrimitiveBase {
 
     std::vector<mkldnn::memory> srcs_memory;
     std::unique_ptr<mkldnn::memory> dst_mem;
+
+    std::vector<mkldnn::memory> gpu_srcs_memory;
+    std::unique_ptr<mkldnn::memory> gpu_dst_mem;
 
     std::vector<mkldnn::memory::desc> srcs_pd;
     std::unique_ptr<mkldnn::memory::desc> src_mpd;
@@ -145,9 +161,11 @@ class SumPrimitive final : public PrimitiveBase {
           new mkldnn::memory::desc({params.src_dims[i]}, MklDnnType<T>(), fmt));
       auto mpd = mkldnn::memory::desc(*context_.src_md);
       auto src_memory = mkldnn::memory(mpd, cpu_engine_, nullptr);
+      auto gpu_src_memory = mkldnn::memory(mpd, gpu_engine_);
 
       context_.srcs_pd.push_back(mpd);
       context_.srcs_memory.push_back(src_memory);
+      context_.gpu_srcs_memory.push_back(gpu_src_memory);
       coeff.push_back(1.0);
     }
 
@@ -155,9 +173,11 @@ class SumPrimitive final : public PrimitiveBase {
     context_.dst_md.reset(new mkldnn::memory::desc(
         {params.dst_dim}, MklDnnType<T>(), mkldnn::memory::format_tag::any));
     context_.sum_pd.reset(new mkldnn::sum::primitive_desc(
-        *context_.dst_md, coeff, context_.srcs_pd, cpu_engine_));
+        *context_.dst_md, coeff, context_.srcs_pd, gpu_engine_));
     context_.dst_mem.reset(new mkldnn::memory(
         context_.sum_pd->dst_desc(), cpu_engine_, nullptr));
+    context_.gpu_dst_mem.reset(new mkldnn::memory(
+        context_.sum_pd->dst_desc(), gpu_engine_));
 
     std::vector<mkldnn::memory> inputs;
     for (int i = 0; i < params.num_inputs; i++) {
@@ -169,6 +189,7 @@ class SumPrimitive final : public PrimitiveBase {
 
   SumContext context_;
   mkldnn::engine& cpu_engine_;
+  mkldnn::engine& gpu_engine_;
 };
 
 // Pool which allows for reuse of MKLDNN Sum primitives which are

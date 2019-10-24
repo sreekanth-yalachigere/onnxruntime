@@ -129,7 +129,7 @@ bool MKLDNNExecutionProvider::UseSubgraph(const onnxruntime::GraphViewer& graph_
       }
     }
   }
-  return use_subgraph;
+  return false;
 }
 
 void MKLDNNExecutionProvider::CreateOrUpdateMklDnnNode(const Node* node,

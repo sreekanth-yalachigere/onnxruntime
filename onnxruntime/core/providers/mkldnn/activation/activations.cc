@@ -33,12 +33,16 @@ struct ReluParams {
   }
 };
 
+static mkldnn::engine& GetGpuEngine() {
+  static mkldnn::engine engine = mkldnn::engine(mkldnn::engine::kind::gpu, 0);
+  return engine;
+}
 template <typename T>
 class ReluPrimitive final : public PrimitiveBase {
  public:
   explicit ReluPrimitive(const ReluParams& params)
-      : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(cpu_engine_));
+      : cpu_engine_(GetEngine()), gpu_engine_(GetGpuEngine()) {
+    context_.stream.reset(new mkldnn::stream(gpu_engine_));
     if (context_.relu_fwd == nullptr) {
       Initialize(params);
     }
@@ -51,11 +55,12 @@ class ReluPrimitive final : public PrimitiveBase {
         static_cast<void*>(const_cast<T*>(src_data)));
     context_.dst_mem->set_data_handle(
         static_cast<void*>(dst_data));
-
+    mkldnn::reorder(*context_.src_mem, *context_.src_mem_gpu).execute(*context_.stream, *context_.src_mem, *context_.src_mem_gpu);
     context_.relu_fwd->execute(
         *context_.stream,
-        {{MKLDNN_ARG_SRC, *context_.src_mem},
-         {MKLDNN_ARG_DST, *context_.dst_mem}});
+        {{MKLDNN_ARG_SRC, *context_.src_mem_gpu},
+         {MKLDNN_ARG_DST, *context_.dst_mem_gpu}});
+    mkldnn::reorder(*context_.dst_mem_gpu, *context_.dst_mem).execute(*context_.stream, *context_.dst_mem_gpu, *context_.dst_mem);
 
     context_.src_mem->set_data_handle(nullptr);
     context_.dst_mem->set_data_handle(nullptr);
@@ -66,6 +71,9 @@ class ReluPrimitive final : public PrimitiveBase {
   struct ReluContext {
     std::unique_ptr<mkldnn::memory> src_mem;
     std::unique_ptr<mkldnn::memory> dst_mem;
+
+    std::unique_ptr<mkldnn::memory> src_mem_gpu;
+    std::unique_ptr<mkldnn::memory> dst_mem_gpu;
 
     size_t src_size;
     size_t dst_size;
@@ -117,19 +125,24 @@ class ReluPrimitive final : public PrimitiveBase {
         mkldnn::prop_kind::forward_inference, algo, *context_.src_md, 0));
 
     context_.relu_fwd_pd.reset(new mkldnn::eltwise_forward::primitive_desc(
-        *context_.fwd_desc, cpu_engine_));
+        *context_.fwd_desc, gpu_engine_));
 
     context_.src_size = context_.relu_fwd_pd.get()->src_desc().get_size();
     context_.dst_size = context_.relu_fwd_pd.get()->dst_desc().get_size();
 
     context_.src_mem.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->src_desc(), cpu_engine_, nullptr));
     context_.dst_mem.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->dst_desc(), cpu_engine_, nullptr));
+
+    context_.src_mem_gpu.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->src_desc(), gpu_engine_));
+    context_.dst_mem_gpu.reset(new mkldnn::memory(context_.relu_fwd_pd.get()->dst_desc(), gpu_engine_));
+
     context_.relu_fwd.reset(
         new mkldnn::eltwise_forward(*context_.relu_fwd_pd));
   }
 
   ReluContext context_;
   mkldnn::engine& cpu_engine_;
+  mkldnn::engine& gpu_engine_;
 };
 
 // Pool which allows for reuse of MKLDNN Relu primitives which are expensive
@@ -169,6 +182,9 @@ Status Relu<T>::Compute(OpKernelContext* context) const {
 
   const TensorShape& x_shape = X->Shape();
   const auto& x_dims = x_shape.GetDims();
+
+  auto engine = mkldnn::engine(mkldnn::engine::kind::gpu, 0);
+  ORT_UNUSED_PARAMETER(engine);
 
   if (X->Shape().NumDimensions() > 5) {
     // Fall Back to CPU implementation.
