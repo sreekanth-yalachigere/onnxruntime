@@ -21,10 +21,10 @@ if(WIN32)
 else()
   set(MKLML_FILE_EXTENSION "tgz")
   if (APPLE)
-    set(MKLDNN_SHARED_LIB libmkldnn.1.dylib)
+    set(MKLDNN_SHARED_LIB libmkldnn.0.dylib)
     set(MKLML_OS_VERSION_STR "mac")
   else()
-    set(MKLDNN_SHARED_LIB libmkldnn.so.1)
+    set(MKLDNN_SHARED_LIB libmkldnn.so.0)
     set(MKLML_OS_VERSION_STR "lnx")
   endif()
   if(onnxruntime_USE_MKLML)
@@ -34,7 +34,7 @@ else()
 endif()
 
 if (onnxruntime_USE_MKLML)
-  set(MKLDNN_VERSION_SHORT v0.20)
+  set(MKLDNN_VERSION_SHORT v1.0)
   set(MKLML_URL https://github.com/intel/mkl-dnn/releases/download/${MKLDNN_VERSION_SHORT}/mklml_${MKLML_OS_VERSION_STR}_${MKLML_VERSION}.${MKLML_FILE_EXTENSION})
 
   ExternalProject_Add(project_mklml
@@ -56,13 +56,15 @@ if (onnxruntime_USE_MKLDNN)
   set(MKLDNN_INSTALL ${CMAKE_CURRENT_BINARY_DIR}/mkl-dnn/install)
   set(MKLDNN_LIB_DIR ${MKLDNN_INSTALL}/${CMAKE_INSTALL_LIBDIR})
   if(WIN32)
+    set(MKLDNN_OPENCL_API ${CMAKE_CURRENT_BINARY_DIR}/OpenCL_SDK/7.0/)
     set(MKLDNN_DLL_PATH ${MKLDNN_INSTALL}/${CMAKE_INSTALL_BINDIR}/${MKLDNN_SHARED_LIB})
+    set(MKLDNN_OCL_INCLUDE_DIR ${MKLDNN_OPENCL_API}/include)  
   else()
     set(MKLDNN_DLL_PATH ${MKLDNN_LIB_DIR}/${MKLDNN_SHARED_LIB})
   endif()
   set(MKLDNN_INCLUDE_DIR ${MKLDNN_INSTALL}/include)
   set(MKLDNN_CMAKE_EXTRA_ARGS)
-  set(MKLDNN_PATCH_COMMAND git apply ${CMAKE_SOURCE_DIR}/patches/mkldnn/constexpr.patch)
+  # set(MKLDNN_PATCH_COMMAND1 git apply ${CMAKE_SOURCE_DIR}/patches/mkldnn/mem-patch.cmake.patch)
   # discard prior changes due to patching in mkldnn source to unblock incremental builds.
   set(MKLDNN_PATCH_DISCARD_COMMAND cd ${MKLDNN_SOURCE} && git checkout -- .)
   if(NOT onnxruntime_BUILD_FOR_NATIVE_MACHINE)
@@ -75,9 +77,9 @@ if (onnxruntime_USE_MKLDNN)
     PREFIX mkl-dnn
     GIT_REPOSITORY ${MKLDNN_URL}
     GIT_TAG ${MKLDNN_TAG}
-    PATCH_COMMAND ${MKLDNN_PATCH_DISCARD_COMMAND} COMMAND ${MKLDNN_PATCH_COMMAND}
+    PATCH_COMMAND ${MKLDNN_PATCH_DISCARD_COMMAND} COMMAND ${MKLDNN_PATCH_COMMAND1}
     SOURCE_DIR ${MKLDNN_SOURCE}
-    CMAKE_ARGS -DMKLDNN_PRODUCT_BUILD_MODE=OFF -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_INSTALL_PREFIX=${MKLDNN_INSTALL} -DMKLROOT=${MKML_DIR} ${MKLDNN_CMAKE_EXTRA_ARGS}
+    CMAKE_ARGS -DMKLDNN_GPU_RUNTIME=OCL -DOPENCLROOT=${MKLDNN_OPENCL_API}  -DMKLDNN_PRODUCT_BUILD_MODE=OFF -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_INSTALL_PREFIX=${MKLDNN_INSTALL} -DMKLROOT=${MKML_DIR} ${MKLDNN_CMAKE_EXTRA_ARGS}
   )
   link_directories(${MKLDNN_LIB_DIR})
   if (onnxruntime_USE_MKLML)
