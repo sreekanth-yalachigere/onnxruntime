@@ -72,12 +72,11 @@ class SumPrimitive final : public PrimitiveBase {
       const T* src_data = X->template Data<T>();
       context_.srcs_memory[i].set_data_handle(
           static_cast<void*>(const_cast<T*>(src_data)));
-     
-	  mkldnn::reorder(context_.srcs_memory[i], context_.gpu_srcs_memory[i]).execute(*context_.stream, context_.srcs_memory[i], context_.gpu_srcs_memory[i]);
+
+      mkldnn::reorder(context_.srcs_memory[i], context_.gpu_srcs_memory[i]).execute(*context_.stream, context_.srcs_memory[i], context_.gpu_srcs_memory[i]);
     }
 
     mkldnn::reorder(*context_.dst_mem, *context_.gpu_dst_mem).execute(*context_.stream, *context_.dst_mem, *context_.gpu_dst_mem);
-
 
     std::unordered_map<int, mkldnn::memory> args{
         {MKLDNN_ARG_DST, *context_.gpu_dst_mem}};
@@ -88,8 +87,7 @@ class SumPrimitive final : public PrimitiveBase {
     context_.net[0].execute(
         *context_.stream, args);
 
-	mkldnn::reorder(*context_.gpu_dst_mem, *context_.dst_mem).execute(*context_.stream, *context_.gpu_dst_mem, *context_.dst_mem);
-
+    mkldnn::reorder(*context_.gpu_dst_mem, *context_.dst_mem).execute(*context_.stream, *context_.gpu_dst_mem, *context_.dst_mem);
 
     //for (int i = 0; i < numinputs; i++) {
     //  context_.srcs_memory[i].set_data_handle(nullptr);

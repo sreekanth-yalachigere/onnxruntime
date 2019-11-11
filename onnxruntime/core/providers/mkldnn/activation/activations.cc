@@ -42,7 +42,7 @@ class ReluPrimitive final : public PrimitiveBase {
  public:
   explicit ReluPrimitive(const ReluParams& params)
       : cpu_engine_(GetEngine()), gpu_engine_(GetGpuEngine()) {
-    context_.stream.reset(new mkldnn::stream(cpu_engine_));
+    context_.stream.reset(new mkldnn::stream(gpu_engine_));
     if (context_.relu_fwd == nullptr) {
       Initialize(params);
     }
@@ -55,12 +55,12 @@ class ReluPrimitive final : public PrimitiveBase {
         static_cast<void*>(const_cast<T*>(src_data)));
     context_.dst_mem->set_data_handle(
         static_cast<void*>(dst_data));
-    //mkldnn::reorder(*context_.src_mem, *context_.src_mem_gpu).execute(*context_.stream, *context_.src_mem, *context_.src_mem_gpu);
+    mkldnn::reorder(*context_.src_mem, *context_.src_mem_gpu).execute(*context_.stream, *context_.src_mem, *context_.src_mem_gpu);
     context_.relu_fwd->execute(
         *context_.stream,
-        {{MKLDNN_ARG_SRC, *context_.src_mem},
-         {MKLDNN_ARG_DST, *context_.dst_mem}});
-    //mkldnn::reorder(*context_.dst_mem_gpu, *context_.dst_mem).execute(*context_.stream, *context_.dst_mem_gpu, *context_.dst_mem);
+        {{MKLDNN_ARG_SRC, *context_.src_mem_gpu},
+         {MKLDNN_ARG_DST, *context_.dst_mem_gpu}});
+    mkldnn::reorder(*context_.dst_mem_gpu, *context_.dst_mem).execute(*context_.stream, *context_.dst_mem_gpu, *context_.dst_mem);
 
     context_.src_mem->set_data_handle(nullptr);
     context_.dst_mem->set_data_handle(nullptr);
@@ -125,7 +125,7 @@ class ReluPrimitive final : public PrimitiveBase {
         mkldnn::prop_kind::forward_inference, algo, *context_.src_md, 0));
 
     context_.relu_fwd_pd.reset(new mkldnn::eltwise_forward::primitive_desc(
-        *context_.fwd_desc, cpu_engine_));
+        *context_.fwd_desc, gpu_engine_));
 
     context_.src_size = context_.relu_fwd_pd.get()->src_desc().get_size();
     context_.dst_size = context_.relu_fwd_pd.get()->dst_desc().get_size();

@@ -56,12 +56,17 @@ struct ConvParams {
   }
 };
 
+static mkldnn::engine& GetGpuEngine() {
+  static mkldnn::engine engine = mkldnn::engine(mkldnn::engine::kind::gpu, 0);
+  return engine;
+}
+
 template <typename T>
 class ConvPrimitive : public PrimitiveBase {
  public:
   explicit ConvPrimitive(const ConvParams& params)
-      : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(cpu_engine_));
+      : cpu_engine_(GetEngine()), gpu_engine_(GetGpuEngine()) {
+    context_.stream.reset(new mkldnn::stream(gpu_engine_));
     if (context_.conv_fwd == nullptr) {
       Initialize(params);
     }
@@ -71,31 +76,21 @@ class ConvPrimitive : public PrimitiveBase {
 
   void Compute(const T* src_data, const T* filter_data,
                T* dst_data, const T* bias_data = nullptr) {
-    context_.src_mem->set_data_handle(
-        static_cast<void*>(const_cast<T*>(src_data)));
-    context_.filter_mem->set_data_handle(
-        static_cast<void*>(const_cast<T*>(filter_data)));
-    if (bias_data != nullptr) {
-      context_.bias_mem->set_data_handle(
-          static_cast<void*>(const_cast<T*>(bias_data)));
-    }
-    context_.dst_mem->set_data_handle(
-        static_cast<void*>(dst_data));
-
     if (bias_data != nullptr) {
       context_.conv_fwd->execute(
           *context_.stream,
-          {{MKLDNN_ARG_SRC, *context_.src_mem},
-           {MKLDNN_ARG_WEIGHTS, *context_.filter_mem},
-           {MKLDNN_ARG_BIAS, *context_.bias_mem},
-           {MKLDNN_ARG_DST, *context_.dst_mem}});
+          {{MKLDNN_ARG_SRC, *context_.src_gmem},
+           {MKLDNN_ARG_WEIGHTS, *context_.filter_gmem},
+           {MKLDNN_ARG_BIAS, *context_.bias_gmem},
+           {MKLDNN_ARG_DST, *context_.dst_gmem}});
     } else {
       context_.conv_fwd->execute(
           *context_.stream,
-          {{MKLDNN_ARG_SRC, *context_.src_mem},
-           {MKLDNN_ARG_WEIGHTS, *context_.filter_mem},
-           {MKLDNN_ARG_DST, *context_.dst_mem}});
+          {{MKLDNN_ARG_SRC, *context_.src_gmem},
+           {MKLDNN_ARG_WEIGHTS, *context_.filter_gmem},
+           {MKLDNN_ARG_DST, *context_.dst_gmem}});
     }
+
     context_.src_mem->set_data_handle(nullptr);
     context_.filter_mem->set_data_handle(nullptr);
     if (bias_data != nullptr) {
@@ -121,6 +116,22 @@ class ConvPrimitive : public PrimitiveBase {
     return context_.conv_fwd_pd.get();
   }
 
+  mkldnn::memory* GetSrcGmem() const {
+    return context_.src_gmem.get();
+  }
+
+  mkldnn::memory* GetDstGmem() const {
+    return context_.dst_gmem.get();
+  }
+
+  mkldnn::memory* GetWeightGmem() const {
+    return context_.filter_gmem.get();
+  }
+
+  mkldnn::memory* GetBiasGmem() const {
+    return context_.bias_gmem.get();
+  }
+
  private:
   struct ConvContext {
     mkldnn::memory::format_tag src_fmt;
@@ -136,6 +147,11 @@ class ConvPrimitive : public PrimitiveBase {
     std::unique_ptr<mkldnn::memory> bias_mem;
     std::unique_ptr<mkldnn::memory> dst_mem;
 
+    std::unique_ptr<mkldnn::memory> src_gmem;
+    std::unique_ptr<mkldnn::memory> filter_gmem;
+    std::unique_ptr<mkldnn::memory> bias_gmem;
+    std::unique_ptr<mkldnn::memory> dst_gmem;
+
     std::unique_ptr<mkldnn::convolution_forward::desc> fwd_desc;
 
     std::unique_ptr<mkldnn::memory::desc> src_md;
@@ -147,6 +163,7 @@ class ConvPrimitive : public PrimitiveBase {
     std::unique_ptr<mkldnn::primitive> conv_fwd;
 
     std::unique_ptr<mkldnn::stream> stream;
+    std::unique_ptr<mkldnn::stream> gstream;
 
     ConvContext()
         : src_fmt(mkldnn::memory::format_tag::any),
@@ -196,7 +213,7 @@ class ConvPrimitive : public PrimitiveBase {
     }
 
     context_.conv_fwd_pd.reset(new mkldnn::convolution_forward::primitive_desc(
-        *context_.fwd_desc, cpu_engine_));
+        *context_.fwd_desc, gpu_engine_));
 
     //context_.filter_fmt = static_cast<mkldnn::memory::format_tag>(
     //    context_.conv_fwd_pd.get()->weights_desc().desc().data.format_tag);
@@ -217,9 +234,18 @@ class ConvPrimitive : public PrimitiveBase {
     context_.dst_mem.reset(
         new mkldnn::memory(context_.conv_fwd_pd.get()->dst_desc(), cpu_engine_, nullptr));
 
+    context_.src_gmem.reset(
+        new mkldnn::memory(context_.conv_fwd_pd.get()->src_desc(), gpu_engine_));
+    context_.filter_gmem.reset(
+        new mkldnn::memory(context_.conv_fwd_pd.get()->weights_desc(), gpu_engine_));
+    context_.dst_gmem.reset(
+        new mkldnn::memory(context_.conv_fwd_pd.get()->dst_desc(), gpu_engine_));
+
     if (!params.bias_dims.empty()) {
       context_.bias_mem.reset(
           new mkldnn::memory(context_.conv_fwd_pd.get()->bias_desc(), cpu_engine_, nullptr));
+      context_.bias_gmem.reset(
+          new mkldnn::memory(context_.conv_fwd_pd.get()->bias_desc(), gpu_engine_));
 
       context_.conv_fwd.reset(new mkldnn::convolution_forward(
           *context_.conv_fwd_pd));
@@ -231,6 +257,7 @@ class ConvPrimitive : public PrimitiveBase {
 
   ConvContext context_;
   mkldnn::engine& cpu_engine_;
+  mkldnn::engine& gpu_engine_;
 };
 
 // Pool which allows for reuse of MKLDNN Conv primitives which are expensive to instantiate.
@@ -359,8 +386,9 @@ Status Conv<T>::Compute(OpKernelContext* context) const {
                            dst_dims_mkl, strides_mkl, dilations_mkl,
                            padding_left_mkl, padding_right_mkl);
     ConvPrimitive<T>* conv_primitive = ConvPrimitivePool<T>::Get(conv_params);
-    auto conv_fwd_pd = conv_primitive->GetPrimitiveDesc();
     mkldnn::engine& cpu_engine = GetEngine();
+    mkldnn::engine& gpu_engine = GetGpuEngine();
+    auto conv_fwd_pd = conv_primitive->GetPrimitiveDesc();
 
     enum mkldnn::memory::format_tag src_format_tag = mkldnn::memory::format_tag::undef;
     enum mkldnn::memory::format_tag filter_format_tag = mkldnn::memory::format_tag::undef;
@@ -396,67 +424,33 @@ Status Conv<T>::Compute(OpKernelContext* context) const {
     auto dst_md = mkldnn::memory::desc(dst_dims_mkl, MklDnnType<T>(), dst_format_tag);
     auto filter_md = mkldnn::memory::desc(filter_dims_mkl, MklDnnType<T>(), filter_format_tag);
 
-    // Reorder src memory layout if necessary.
-    if (src_md != conv_fwd_pd->src_desc()) {
-      auto pd = mkldnn::memory::desc(src_md);
-      mkldnn::memory src = mkldnn::memory(pd, cpu_engine, (void*)src_data);
-      // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
-      // mkldnn using padding to allow use of blocked format_tag.
-      src_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, conv_primitive->GetSrcSize());
-      mkldnn::memory dst = mkldnn::memory(conv_fwd_pd->src_desc(), cpu_engine, src_reorder_buffer.get());
-      mkldnn::reorder(src, dst)
-          .execute(cpu_engine, src, dst);
-      src_data = static_cast<T*>(dst.get_data_handle());
-    }
+    auto cpu_stream = mkldnn::stream(cpu_engine);
+    auto gpu_stream = mkldnn::stream(gpu_engine);
 
-    // Reorder filter memory layout if necessary
-    // Avoid data reordering. Save filter memory in mkldnn format_tag from first iteration
-    // in execution provider mapped by weight name.
-    {
-      // lock to make sure reordering is done only once
-      std::lock_guard<OrtMutex> lock(provider_->GetMutex());
-      auto weight_name = OpKernel::Node().InputDefs()[1]->Name();
-      std::shared_ptr<mkldnn::memory> filter_dst_mem = provider_->GetWeightsMemoryBuffer(weight_name);
+    auto src_pd = mkldnn::memory::desc(src_md);
+    mkldnn::memory src_mem = mkldnn::memory(src_pd, cpu_engine, (void*)src_data);
+    mkldnn::reorder(src_mem, *conv_primitive->GetSrcGmem())
+        .execute(gpu_stream, src_mem, *conv_primitive->GetSrcGmem());
 
-      if (filter_dst_mem == nullptr) {
-        if (filter_md != conv_fwd_pd->weights_desc()) {
-          auto pd = mkldnn::memory::desc(mkldnn::memory::desc(
-              filter_dims_mkl, MklDnnType<T>(), filter_format_tag));
-          mkldnn::memory src = mkldnn::memory(pd, cpu_engine, (void*)filter_data);
-          IAllocatorUniquePtr<void> filter_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, conv_primitive->GetFilterSize());
-          filter_dst_mem.reset(
-              new mkldnn::memory(conv_fwd_pd->weights_desc(), cpu_engine, filter_reorder_buffer.get()));
+    auto filter_pd = mkldnn::memory::desc(mkldnn::memory::desc(
+        filter_dims_mkl, MklDnnType<T>(), filter_format_tag));
+    mkldnn::memory filter_mem = mkldnn::memory(filter_pd, cpu_engine, (void*)filter_data);
+    mkldnn::reorder(filter_mem, *conv_primitive->GetWeightGmem())
+        .execute(gpu_stream, filter_mem, *conv_primitive->GetWeightGmem());
 
-          MemoryReorderParams params(src, *filter_dst_mem);
-          DoReorder<T>(params);
-          provider_->SaveAllocatedMemory(std::move(filter_reorder_buffer));
-
-          filter_data = static_cast<T*>(filter_dst_mem->get_data_handle());
-          provider_->SetWeightsMemoryBuffer(weight_name, filter_dst_mem);
-        }
-      } else {
-        filter_data = static_cast<T*>(filter_dst_mem->get_data_handle());
-      }
-    }
-    // Allocate dst buffer if reorder is necessary
-    if (dst_md != conv_fwd_pd->dst_desc()) {
-      // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
-      // mkldnn using padding to allow use of blocked format_tag.
-      dst_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, conv_primitive->GetDstSize());
-      dst_data = static_cast<T*>(dst_reorder_buffer.get());
+    if (bias_data != nullptr) {
+      mkldnn::memory bias_mem = mkldnn::memory(conv_fwd_pd->bias_desc(), cpu_engine, (void*)bias_data);
+      mkldnn::reorder(bias_mem, *conv_primitive->GetBiasGmem())
+          .execute(gpu_stream, bias_mem, *conv_primitive->GetBiasGmem());
     }
 
     conv_primitive->Compute(src_data, filter_data, dst_data, bias_data);
 
-    // Reorder dst memory layout if necessary
-    if (dst_md != conv_fwd_pd->dst_desc()) {
-      mkldnn::memory src = mkldnn::memory(conv_fwd_pd->dst_desc(), cpu_engine, (void*)dst_data);
-      auto pd = mkldnn::memory::desc(dst_md);
-      mkldnn::memory dst = mkldnn::memory(pd, cpu_engine, Y->template MutableData<T>());
-      mkldnn::reorder(src, dst)
-          .execute(cpu_engine, src, dst);
-    }
-
+    // mkldnn::memory src = mkldnn::memory(conv_fwd_pd->dst_desc(), gpu_engine, (void*)dst_data);
+    auto dst_pd = mkldnn::memory::desc(dst_md);
+    mkldnn::memory dst_mem = mkldnn::memory(dst_pd, cpu_engine, Y->template MutableData<T>());
+    mkldnn::reorder(*conv_primitive->GetDstGmem(), dst_mem)
+        .execute(gpu_stream, *conv_primitive->GetDstGmem(), dst_mem);
   } catch (const mkldnn::error& e) {
     return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Status: ", e.status, ", message: ", e.what());
   }

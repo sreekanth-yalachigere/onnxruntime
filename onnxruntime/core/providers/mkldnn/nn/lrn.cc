@@ -70,15 +70,14 @@ class LRNPrimitive : public PrimitiveBase {
     context_.src_mem->set_data_handle(static_cast<void*>(const_cast<T*>(src_data)));
     context_.dst_mem->set_data_handle(static_cast<void*>(dst_data));
 
-	mkldnn::reorder(*context_.src_mem, *context_.gpu_src_mem).execute(*context_.stream, *context_.src_mem, *context_.gpu_src_mem);
+    mkldnn::reorder(*context_.src_mem, *context_.gpu_src_mem).execute(*context_.stream, *context_.src_mem, *context_.gpu_src_mem);
 
-	context_.lrn_fwd->execute(
+    context_.lrn_fwd->execute(
         *context_.stream,
         {{MKLDNN_ARG_SRC, *context_.gpu_src_mem},
          {MKLDNN_ARG_DST, *context_.gpu_dst_mem}});
 
-	mkldnn::reorder(*context_.gpu_dst_mem, *context_.dst_mem).execute(*context_.stream, *context_.gpu_dst_mem, *context_.dst_mem);
-
+    mkldnn::reorder(*context_.gpu_dst_mem, *context_.dst_mem).execute(*context_.stream, *context_.gpu_dst_mem, *context_.dst_mem);
 
     context_.src_mem->set_data_handle(nullptr);
     context_.dst_mem->set_data_handle(nullptr);
@@ -147,11 +146,11 @@ class LRNPrimitive : public PrimitiveBase {
     context_.src_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->src_desc(), cpu_engine_, nullptr));
     context_.dst_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->dst_desc(), cpu_engine_, nullptr));
 
-	context_.gpu_src_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->src_desc(), gpu_engine_));
+    context_.gpu_src_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->src_desc(), gpu_engine_));
     context_.gpu_dst_mem.reset(new mkldnn::memory(context_.fwd_primitive_desc.get()->dst_desc(), gpu_engine_));
 
     context_.lrn_fwd.reset(
-		new mkldnn::lrn_forward(*context_.fwd_primitive_desc));
+        new mkldnn::lrn_forward(*context_.fwd_primitive_desc));
   }
 
   LRNContext context_;

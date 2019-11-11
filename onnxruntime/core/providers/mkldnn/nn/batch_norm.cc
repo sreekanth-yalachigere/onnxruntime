@@ -91,13 +91,11 @@ class BatchNormPrimitive final : public PrimitiveBase {
     MEMCPY_S(scale_shift_buf, scale_data, src_bytes, dst_bytes);
     MEMCPY_S(&scale_shift_buf[scale_dims_channels], b_data, src_bytes, dst_bytes);
 
-	mkldnn::reorder(*context_.src_mem, *context_.gpu_src_mem).execute(*context_.stream, *context_.src_mem, *context_.gpu_src_mem);
+    mkldnn::reorder(*context_.src_mem, *context_.gpu_src_mem).execute(*context_.stream, *context_.src_mem, *context_.gpu_src_mem);
     mkldnn::reorder(*context_.mean_mem, *context_.gpu_mean_mem).execute(*context_.stream, *context_.mean_mem, *context_.gpu_mean_mem);
     mkldnn::reorder(*context_.var_mem, *context_.gpu_var_mem).execute(*context_.stream, *context_.var_mem, *context_.gpu_var_mem);
     mkldnn::reorder(*context_.scale_shift_mem, *context_.gpu_scale_shift_mem).execute(*context_.stream, *context_.scale_shift_mem, *context_.gpu_scale_shift_mem);
     mkldnn::reorder(*context_.dst_mem, *context_.gpu_dst_mem).execute(*context_.stream, *context_.dst_mem, *context_.gpu_dst_mem);
-
-
 
     context_.net[0].execute(
         *context_.stream,
@@ -108,7 +106,6 @@ class BatchNormPrimitive final : public PrimitiveBase {
          {MKLDNN_ARG_DST, *context_.gpu_dst_mem}});
 
     mkldnn::reorder(*context_.gpu_dst_mem, *context_.dst_mem).execute(*context_.stream, *context_.gpu_dst_mem, *context_.dst_mem);
-
 
     return;
   }
@@ -126,7 +123,7 @@ class BatchNormPrimitive final : public PrimitiveBase {
     std::unique_ptr<mkldnn::memory> var_mem;
     std::unique_ptr<mkldnn::memory> dst_mem;
 
-	std::unique_ptr<mkldnn::memory> gpu_src_mem;
+    std::unique_ptr<mkldnn::memory> gpu_src_mem;
     std::unique_ptr<mkldnn::memory> gpu_scale_shift_mem;
     std::unique_ptr<mkldnn::memory> gpu_mean_mem;
     std::unique_ptr<mkldnn::memory> gpu_var_mem;
@@ -204,7 +201,7 @@ class BatchNormPrimitive final : public PrimitiveBase {
     context_.var_mem.reset(
         new mkldnn::memory(*context_.var_md, cpu_engine_, nullptr));
 
-	context_.gpu_mean_mem.reset(
+    context_.gpu_mean_mem.reset(
         new mkldnn::memory(*context_.mean_md, gpu_engine_));
     context_.gpu_var_mem.reset(
         new mkldnn::memory(*context_.var_md, gpu_engine_));
