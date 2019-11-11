@@ -77,12 +77,17 @@ struct PoolParams {
   }
 };
 
+static mkldnn::engine& GetGpuEngine() {
+  static mkldnn::engine engine = mkldnn::engine(mkldnn::engine::kind::gpu, 0);
+  return engine;
+}
+
 template <typename T, typename PoolType>
 class PoolPrimitive : public PrimitiveBase {
  public:
   explicit PoolPrimitive(const PoolParams& params)
-      : cpu_engine_(GetEngine()) {
-    context_.stream.reset(new mkldnn::stream(cpu_engine_));
+      : cpu_engine_(GetEngine()), gpu_engine_(GetGpuEngine()) {
+    context_.stream.reset(new mkldnn::stream(gpu_engine_));
     if (context_.pool_fwd == nullptr) {
       Initialize(params);
     }
@@ -93,10 +98,18 @@ class PoolPrimitive : public PrimitiveBase {
   void Compute(const T* src_data, T* dst_data) {
     context_.src_mem->set_data_handle(static_cast<void*>(const_cast<T*>(src_data)));
     context_.dst_mem->set_data_handle(static_cast<void*>(dst_data));
-    //context_.stream->submit(context_.net);
+
+    mkldnn::reorder(*context_.src_mem, *context_.gpu_src_mem).execute(*context_.stream, *context_.src_mem, *context_.gpu_src_mem);
+
+    context_.pool_fwd->execute(
+        *context_.stream,
+        {{MKLDNN_ARG_SRC, *context_.gpu_src_mem},
+         {MKLDNN_ARG_DST, *context_.gpu_dst_mem}});
+
+    mkldnn::reorder(*context_.gpu_dst_mem, *context_.dst_mem).execute(*context_.stream, *context_.gpu_dst_mem, *context_.dst_mem);
 
     context_.src_mem->set_data_handle(nullptr);
-    context_.dst_mem->set_data_handle(nullptr);
+    // context_.dst_mem->set_data_handle(nullptr);
     return;
   }
 
@@ -111,6 +124,13 @@ class PoolPrimitive : public PrimitiveBase {
     return context_.fwd_primitive_desc.get();
   }
 
+  mkldnn::memory* getGpuSrcMem() const {
+    return context_.gpu_src_mem.get();
+  }
+
+  mkldnn::memory* getGpuDstMem() const {
+    return context_.gpu_dst_mem.get();
+  }
  private:
   struct PoolContext {
     mkldnn::memory::format_tag src_fmt;
@@ -121,6 +141,8 @@ class PoolPrimitive : public PrimitiveBase {
 
     std::unique_ptr<mkldnn::memory> src_mem;
     std::unique_ptr<mkldnn::memory> dst_mem;
+    std::unique_ptr<mkldnn::memory> gpu_src_mem;
+    std::unique_ptr<mkldnn::memory> gpu_dst_mem;
 
     std::unique_ptr<mkldnn::pooling_forward::desc> fwd_desc;
 
@@ -149,15 +171,15 @@ class PoolPrimitive : public PrimitiveBase {
   };
 
   void Initialize(const PoolParams& params) {
-    bool is_2D = params.src_dims.size() == 4 ? true : false;
-    mkldnn::memory::format_tag fmt = mkldnn::memory::format_tag::any;
-    if (CPUIDInfo::GetCPUIDInfo().HasAVX512f()) {
-      fmt = is_2D ? mkldnn::memory::format_tag::nChw16c : mkldnn::memory::format_tag::nCdhw16c;
-    } else if (CPUIDInfo::GetCPUIDInfo().HasAVX2() && (params.src_dims[1] % 8 == 0)) {
-      fmt = is_2D ? mkldnn::memory::format_tag::nChw8c : mkldnn::memory::format_tag::ncdhw;
-    } else {
-      fmt = is_2D ? mkldnn::memory::format_tag::nchw : mkldnn::memory::format_tag::ncdhw;
-    }
+    //bool is_2D = params.src_dims.size() == 4 ? true : false;
+    mkldnn::memory::format_tag fmt = mkldnn::memory::format_tag::nchw;
+    //if (CPUIDInfo::GetCPUIDInfo().HasAVX512f()) {
+    //  fmt = is_2D ? mkldnn::memory::format_tag::nChw16c : mkldnn::memory::format_tag::nCdhw16c;
+    //} else if (CPUIDInfo::GetCPUIDInfo().HasAVX2() && (params.src_dims[1] % 8 == 0)) {
+    //  fmt = is_2D ? mkldnn::memory::format_tag::nChw8c : mkldnn::memory::format_tag::ncdhw;
+    //} else {
+    //  fmt = is_2D ? mkldnn::memory::format_tag::nchw : mkldnn::memory::format_tag::ncdhw;
+    //}
     context_.src_md.reset(new mkldnn::memory::desc(
         {params.src_dims}, MklDnnType<T>(), fmt));
     context_.dst_md.reset(new mkldnn::memory::desc(
@@ -177,7 +199,7 @@ class PoolPrimitive : public PrimitiveBase {
         params.padding_left, params.padding_right));
 
     context_.fwd_primitive_desc.reset(new mkldnn::pooling_forward::primitive_desc(
-        *context_.fwd_desc, cpu_engine_));
+        *context_.fwd_desc, gpu_engine_));
 
     context_.src_size = context_.fwd_primitive_desc.get()->src_desc().get_size();
     context_.dst_size = context_.fwd_primitive_desc.get()->dst_desc().get_size();
@@ -186,6 +208,12 @@ class PoolPrimitive : public PrimitiveBase {
         new mkldnn::memory(context_.fwd_primitive_desc.get()->src_desc(), cpu_engine_, nullptr));
     context_.dst_mem.reset(
         new mkldnn::memory(context_.fwd_primitive_desc.get()->dst_desc(), cpu_engine_, nullptr));
+
+    context_.gpu_src_mem.reset(
+        new mkldnn::memory(context_.fwd_primitive_desc.get()->src_desc(), gpu_engine_));
+    context_.gpu_dst_mem.reset(
+        new mkldnn::memory(context_.fwd_primitive_desc.get()->dst_desc(), gpu_engine_));
+
     context_.pool_fwd.reset(
         new mkldnn::pooling_forward(*context_.fwd_primitive_desc));
     context_.net.push_back(*context_.pool_fwd);
@@ -193,6 +221,7 @@ class PoolPrimitive : public PrimitiveBase {
 
   PoolContext context_;
   mkldnn::engine& cpu_engine_;
+  mkldnn::engine& gpu_engine_;
 };
 
 // Pool which allows for reuse of MKLDNN Pool primitives which are expensive to instantiate.
@@ -280,45 +309,48 @@ Status Pool<T, PoolType>::Compute(OpKernelContext* context) const {
                            padding_left_mkl, padding_right_mkl,
                            this->pool_attrs_.count_include_pad);
     PoolPrimitive<T, PoolType>* pool_primitive = PoolPrimitivePool<T, PoolType>::Get(pool_params);
-    auto fwd_primitive_desc = pool_primitive->GetPrimitiveDesc();
+    //auto fwd_primitive_desc = pool_primitive->GetPrimitiveDesc();
 
-    mkldnn::engine& cpu_engine = GetEngine();
+    //mkldnn::engine& cpu_engine = GetEngine();
+    //mkldnn::engine& gpu_engine = GetGpuEngine();
     mkldnn::memory::format_tag mem_format = src_dims_mkl.size() == 5 ? mkldnn::memory::format_tag::ncdhw : mkldnn::memory::format_tag::nchw;
     // Per ONNX spec, X (src) is NCHW and Y (dst) is NCHW
     auto src_md = mkldnn::memory::desc(src_dims_mkl, MklDnnType<T>(), mem_format);
     auto dst_md = mkldnn::memory::desc(dst_dims_mkl, MklDnnType<T>(), mem_format);
 
-    // Reorder src memory layout if necessary.
-    if (src_md != pool_primitive->GetPrimitiveDesc()->src_desc()) {
-      auto pd = mkldnn::memory::desc(src_md);
-      mkldnn::memory src = mkldnn::memory(pd, cpu_engine, (void*)src_data);
-      // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
-      // mkldnn using padding to allow use of blocked format.
-      src_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, pool_primitive->GetSrcSize());
-      mkldnn::memory dst = mkldnn::memory(fwd_primitive_desc->src_desc(), cpu_engine, src_reorder_buffer.get());
-      MemoryReorderParams params(src, dst);
-      DoReorder<T>(params);
-      src_data = static_cast<T*>(dst.get_data_handle());
-    }
+    //// Reorder src memory layout if necessary.
+    //if (src_md != pool_primitive->GetPrimitiveDesc()->src_desc()) {
+    //  auto pd = mkldnn::memory::desc(src_md);
+    //  mkldnn::memory src = mkldnn::memory(pd, cpu_engine, (void*)src_data);
+    //  // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
+    //  // mkldnn using padding to allow use of blocked format.
+    //  src_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, pool_primitive->GetSrcSize());
+    //  mkldnn::memory dst = mkldnn::memory(fwd_primitive_desc->src_desc(), cpu_engine, src_reorder_buffer.get());
+    //  MemoryReorderParams params(src, dst);
+    //  DoReorder<T>(params);
+    //  src_data = static_cast<T*>(dst.get_data_handle());
+    //}
 
     // Allocate dst buffer if reorder is necessary
-    if (dst_md != pool_primitive->GetPrimitiveDesc()->dst_desc()) {
-      // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
-      // mkldnn using padding to allow use of blocked format.
-      dst_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, pool_primitive->GetDstSize());
-      dst_data = static_cast<T*>(dst_reorder_buffer.get());
-    }
+    //if (dst_md != pool_primitive->GetPrimitiveDesc()->dst_desc()) {
+    //  // allocate the size queried from memory primitive desc. it may not match tensor logical size due to
+    //  // mkldnn using padding to allow use of blocked format.
+    //  dst_reorder_buffer = IAllocator::MakeUniquePtr<void>(alloc, pool_primitive->GetDstSize());
+    //  dst_data = static_cast<T*>(dst_reorder_buffer.get());
+    //}
 
     pool_primitive->Compute(src_data, dst_data);
 
+
     // Reorder dst memory layout if necessary
-    if (dst_md != pool_primitive->GetPrimitiveDesc()->dst_desc()) {
-      mkldnn::memory src = mkldnn::memory(fwd_primitive_desc->dst_desc(), cpu_engine, (void*)dst_data);
-      auto pd = mkldnn::memory::desc(dst_md);
-      mkldnn::memory dst = mkldnn::memory(pd, cpu_engine, Y->template MutableData<T>());
-      MemoryReorderParams params(src, dst);
-      DoReorder<T>(params);
-    }
+    //if (dst_md != pool_primitive->GetPrimitiveDesc()->dst_desc()) {
+    //  mkldnn::memory src = mkldnn::memory(fwd_primitive_desc->dst_desc(), cpu_engine, (void*)dst_data);
+    //  auto pd = mkldnn::memory::desc(dst_md);
+    //  mkldnn::memory dst = mkldnn::memory(pd, cpu_engine, Y->template MutableData<T>());
+    //  MemoryReorderParams params(src, dst);
+    //  DoReorder<T>(params);
+    //}
+
   } catch (const mkldnn::error& e) {
     return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Status: ", e.status, ", message: ", e.what());
   }
