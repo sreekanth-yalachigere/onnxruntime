@@ -24,6 +24,7 @@ class MklDnnSum : public MklDnnKernel {
   Status CreatePrimitives(const OrtCustomOpApi* api,
                           OrtKernelContext* context,
                           mkldnn::engine& cpu_engine,
+						  mkldnn::engine& gpu_engine,
                           std::vector<mkldnn::primitive>& net,
                           std::vector<std::unordered_map<int, mkldnn::memory>>& net_args) override {
     Ort::CustomOpApi ort{*api};
@@ -76,23 +77,34 @@ class MklDnnSum : public MklDnnKernel {
             x_shape1.GetDims().begin(), x_shape1.GetDims().end());
         auto mpd = mkldnn::memory::desc({src_dims}, MklDnnType<T>(), ort_source_format_);
         auto src_memory = mkldnn::memory(mpd, cpu_engine, nullptr);
+        auto src_memory_gpu = mkldnn::memory(mpd, gpu_engine);
+        net.push_back(mkldnn::reorder(src_memory, src_memory_gpu));
+        net_args.push_back({{MKLDNN_ARG_SRC, src_memory},
+                            {MKLDNN_ARG_DST, src_memory_gpu}});
         srcs_pd_.push_back(mpd);
         srcs_memory_.push_back(src_memory);
+        srcs_memory_gpu_.push_back(src_memory_gpu);
         coeff.push_back(1.0);
       } else {
         x_shape = parents_[0].get()->primitive_dst_shape_;
         auto mpd = mkldnn::memory::desc(parents_[i].get()->primitive_dst_desc_);
         auto src_memory = *parents_[i].get()->primitive_dst_mem_;
+        auto src_memory_gpu = mkldnn::memory(mpd, gpu_engine);
+        net.push_back(mkldnn::reorder(src_memory, src_memory_gpu));
+        net_args.push_back({{MKLDNN_ARG_SRC, src_memory},
+                            {MKLDNN_ARG_DST, src_memory_gpu}});
         srcs_pd_.push_back(mpd);
         srcs_memory_.push_back(src_memory);
+        srcs_memory_gpu_.push_back(src_memory_gpu);
         coeff.push_back(1.0);
       }
     }
 
+	
 	primitive_dst_md_.reset(new mkldnn::memory::desc(
         {dst_dims_mkl}, MklDnnType<T>(), mkldnn::memory::format_tag::any));
     sum_pd_.reset(new mkldnn::sum::primitive_desc(
-        *primitive_dst_md_, coeff, srcs_pd_, cpu_engine));
+        *primitive_dst_md_, coeff, srcs_pd_, gpu_engine));
 
     if (mklnode_ptr_->output_index >= 0) {
       // last node of sub-graph. need to allocate memory for output_tensor
@@ -113,19 +125,27 @@ class MklDnnSum : public MklDnnKernel {
 
     auto c = mkldnn::sum(*sum_pd_);
     net.push_back(c);
+
+	//create gpu dst mem
+    primitive_dst_mem_gpu_.reset(new mkldnn::memory(sum_pd_->dst_desc(), gpu_engine));
     std::unordered_map<int, mkldnn::memory> args{
-        {MKLDNN_ARG_DST, *primitive_dst_mem_}};
+        {MKLDNN_ARG_DST, *primitive_dst_mem_gpu_}};
     for (int i = 0; i < (int)num_inputs; i++) {
-      args.insert({MKLDNN_ARG_MULTIPLE_SRC + i, srcs_memory_[i]});
+      args.insert({MKLDNN_ARG_MULTIPLE_SRC + i, srcs_memory_gpu_[i]});
     }
     net_args.push_back(args);
 
-    if (mklnode_ptr_->output_index >= 0) {
-      // one of the end nodes. Allocate output buffer memory and
-      // reorder is necessary
-      mkldnn::memory::data_type t = MklDnnType<T>();
-      InitDstReorderOutput(cpu_engine, t, net, net_args);
-    }
+	//reorder from gpu dst mem to cpu
+    net.push_back(mkldnn::reorder(*primitive_dst_mem_gpu_, *primitive_dst_mem_));
+    net_args.push_back({{MKLDNN_ARG_SRC, *primitive_dst_mem_gpu_},
+                        {MKLDNN_ARG_DST, *primitive_dst_mem_}});
+
+    //if (mklnode_ptr_->output_index >= 0) {
+    //  // one of the end nodes. Allocate output buffer memory and
+    //  // reorder is necessary
+    //  mkldnn::memory::data_type t = MklDnnType<T>();
+    //  InitDstReorderOutput(cpu_engine, t, net, net_args);
+    //}
     return Status::OK();
   }
 
@@ -163,6 +183,7 @@ class MklDnnSum : public MklDnnKernel {
   std::unique_ptr<mkldnn::memory::desc> src_md_;
   std::vector<mkldnn::memory::desc> src_mds_;
   std::vector<mkldnn::memory> srcs_memory_;
+  std::vector<mkldnn::memory> srcs_memory_gpu_;
 
   std::vector<mkldnn::memory::desc> srcs_pd_;
   std::unique_ptr<mkldnn::memory::desc> src_mpd_;

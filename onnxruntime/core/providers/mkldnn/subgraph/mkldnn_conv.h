@@ -73,6 +73,7 @@ class MklDnnConv : public MklDnnKernel {
   Status CreatePrimitives(const OrtCustomOpApi* api,
                           OrtKernelContext* context,
                           mkldnn::engine& cpu_engine,
+						  mkldnn::engine& gpu_engine,
                           std::vector<mkldnn::primitive>& net,
                           std::vector<std::unordered_map<int, mkldnn::memory>>& net_args) override {
     Ort::CustomOpApi ort{*api};

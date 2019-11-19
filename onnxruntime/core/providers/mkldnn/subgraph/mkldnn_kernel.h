@@ -29,6 +29,7 @@ class MklDnnKernel {
   virtual Status CreatePrimitives(const OrtCustomOpApi* api,
                                   OrtKernelContext* context,
                                   mkldnn::engine& cpu_engine,
+								  mkldnn::engine& gpu_engine,
                                   std::vector<mkldnn::primitive>& net,
                                   std::vector<std::unordered_map<int, mkldnn::memory>> &net_args) = 0;
 
@@ -92,6 +93,7 @@ class MklDnnKernel {
   bool fuse_relu_ = false;
   bool fuse_sum_ = false;
   std::shared_ptr<mkldnn::memory> primitive_dst_mem_;
+  std::shared_ptr<mkldnn::memory> primitive_dst_mem_gpu_;
   std::unique_ptr<mkldnn::memory::desc> primitive_dst_md_;
   TensorShape primitive_dst_shape_;
   mkldnn::memory::desc primitive_dst_desc_;
