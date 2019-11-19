@@ -67,7 +67,7 @@ class SubgraphPrimitive : public PrimitiveBase {
   }
   void CreateKernels(const SubgraphParams& params) {
     for (const auto& mkldnn_node : params.subgraph->mkldnn_nodes) {
-      if (mkldnn_node.name == "ConvUndoThis") {
+      if (mkldnn_node.name == "Conv") {
         std::ostringstream os;
         os << "Conv-" << mkldnn_node.node_index << "-";
         std::shared_ptr<MklDnnConv<T>> kernel;
@@ -95,7 +95,7 @@ class SubgraphPrimitive : public PrimitiveBase {
           kernel->parents_.push_back(context_.kernels[index]);
         }
         context_.kernels.push_back(kernel);
-      }/* else if (mkldnn_node.name == "BatchNormalization") {
+      } else if (mkldnn_node.name == "BatchNormalization") {
         std::ostringstream os;
         os << "BatchNormalization-" << mkldnn_node.node_index << "-";
         std::shared_ptr<MklDnnBatchNorm<T>> kernel;
@@ -104,7 +104,7 @@ class SubgraphPrimitive : public PrimitiveBase {
           kernel->parents_.push_back(context_.kernels[index]);
         }
         context_.kernels.push_back(kernel);
-      } else if (mkldnn_node.name == "BatchNormalization-Relu") {
+      } /*else if (mkldnn_node.name == "BatchNormalization-Relu") {
         std::ostringstream os;
         os << "BatchNormalization-" << mkldnn_node.node_index << "-";
         std::shared_ptr<MklDnnBatchNorm<T>> kernel;
@@ -150,7 +150,7 @@ class SubgraphPrimitive : public PrimitiveBase {
           kernel->parents_.push_back(context_.kernels[index]);
         }
         context_.kernels.push_back(kernel);
-      } else if (mkldnn_node.name == "LRN") {
+      }*/ else if (mkldnn_node.name == "LRN") {
         std::ostringstream os;
         os << "LRN-" << mkldnn_node.node_index << "-";
         std::shared_ptr<MklDnnLrn<T>> kernel;
@@ -159,7 +159,7 @@ class SubgraphPrimitive : public PrimitiveBase {
           kernel->parents_.push_back(context_.kernels[index]);
         }
         context_.kernels.push_back(kernel);
-      }*/ else if (mkldnn_node.name == "Sum") {
+      } else if (mkldnn_node.name == "Sum") {
         std::ostringstream os;
         os << "Sum-" << mkldnn_node.node_index << "-";
         std::shared_ptr<MklDnnSum<T>> kernel;

@@ -100,6 +100,7 @@ class MklDnnBatchNorm : public MklDnnKernel {
   Status CreatePrimitives(const OrtCustomOpApi* api,
                           OrtKernelContext* context,
                           mkldnn::engine& cpu_engine,
+						  mkldnn::engine& gpu_engine,
                           std::vector<mkldnn::primitive>& net,
                           std::vector<std::unordered_map<int, mkldnn::memory>>& net_args) override {
     Ort::CustomOpApi ort{*api};
@@ -209,10 +210,17 @@ class MklDnnBatchNorm : public MklDnnKernel {
     scale_shift_mem_.reset(
         new mkldnn::memory({*scale_shift_md_, cpu_engine}));
 
+	scale_shift_mem_gpu_.reset(
+        new mkldnn::memory({*scale_shift_md_, gpu_engine}));
+
     mean_mem_.reset(
         new mkldnn::memory(*mean_md_, cpu_engine, nullptr));
+    mean_mem_gpu_.reset(
+            new mkldnn::memory(*mean_md_, gpu_engine));
     var_mem_.reset(
         new mkldnn::memory(*var_md_, cpu_engine, nullptr));
+    var_mem_gpu_.reset(
+        new mkldnn::memory(*var_md_, gpu_engine));
 
     batchnorm_fwd_.reset(new mkldnn::batch_normalization_forward::desc(
         mkldnn::prop_kind::forward_inference, *src_md_, epsilon_,
@@ -231,11 +239,11 @@ class MklDnnBatchNorm : public MklDnnKernel {
       attr.set_post_ops(ops);
 
       batchnorm_fwd_pd_.reset(new mkldnn::batch_normalization_forward::primitive_desc(
-          *batchnorm_fwd_, attr, cpu_engine));
+          *batchnorm_fwd_, attr, gpu_engine));
     } else {
       batchnorm_fwd_pd_.reset(
           new mkldnn::batch_normalization_forward::primitive_desc(
-              *batchnorm_fwd_, cpu_engine));
+              *batchnorm_fwd_, gpu_engine));
     }
 
     // out format of this kernel
@@ -251,6 +259,10 @@ class MklDnnBatchNorm : public MklDnnKernel {
       src_mem_ = parents_[0].get()->primitive_dst_mem_;
     }
 
+	src_mem_gpu_.reset(
+        new mkldnn::memory(batchnorm_fwd_pd_.get()->src_desc(), gpu_engine));
+	
+
     if (mklnode_ptr_->output_index >= 0) {
       // Use mkldnn's internal output buffer
       if (primitive_dst_desc_ != ort_source_desc_) {
@@ -262,13 +274,41 @@ class MklDnnBatchNorm : public MklDnnKernel {
       // last node of sub-graph. need to allocate memory for output_tensor
       primitive_dst_mem_.reset(new mkldnn::memory(batchnorm_fwd_pd_->dst_desc(), cpu_engine));
     }
+
+	primitive_dst_mem_gpu_.reset(new mkldnn::memory(batchnorm_fwd_pd_.get()->dst_desc(), gpu_engine));
+
+	//reorder src mem from cpu to gpu
+        net.push_back(mkldnn::reorder(*src_mem_, *src_mem_gpu_));
+        net_args.push_back({{MKLDNN_ARG_SRC, *src_mem_},
+                            {MKLDNN_ARG_DST, *src_mem_gpu_}});
+
+	//reorder src mem from cpu to gpu
+        net.push_back(mkldnn::reorder(*mean_mem_, *mean_mem_gpu_));
+        net_args.push_back({{MKLDNN_ARG_SRC, *mean_mem_},
+                            {MKLDNN_ARG_DST, *mean_mem_gpu_}});
+
+	//reorder src mem from cpu to gpu
+        net.push_back(mkldnn::reorder(*var_mem_, *var_mem_gpu_));
+        net_args.push_back({{MKLDNN_ARG_SRC, *var_mem_},
+                            {MKLDNN_ARG_DST, *var_mem_gpu_}});
+
+	//reorder src mem from cpu to gpu
+        net.push_back(mkldnn::reorder(*scale_shift_mem_, *scale_shift_mem_gpu_));
+        net_args.push_back({{MKLDNN_ARG_SRC, *scale_shift_mem_},
+                            {MKLDNN_ARG_DST, *scale_shift_mem_gpu_}});
+
     auto bn = mkldnn::batch_normalization_forward(
         *batchnorm_fwd_pd_);
     net.push_back(bn);
-    net_args.push_back({{MKLDNN_ARG_SRC, *src_mem_},
-                        {MKLDNN_ARG_MEAN, *mean_mem_},
-                        {MKLDNN_ARG_VARIANCE, *var_mem_},
-                        {MKLDNN_ARG_SCALE_SHIFT, *scale_shift_mem_},
+    net_args.push_back({{MKLDNN_ARG_SRC, *src_mem_gpu_},
+                        {MKLDNN_ARG_MEAN, *mean_mem_gpu_},
+                        {MKLDNN_ARG_VARIANCE, *var_mem_gpu_},
+                        {MKLDNN_ARG_SCALE_SHIFT, *scale_shift_mem_gpu_},
+                        {MKLDNN_ARG_DST, *primitive_dst_mem_gpu_}});
+
+	 //reorder dst mem from gpu to cpu
+    net.push_back(mkldnn::reorder(*primitive_dst_mem_gpu_, *primitive_dst_mem_));
+    net_args.push_back({{MKLDNN_ARG_SRC, *primitive_dst_mem_gpu_},
                         {MKLDNN_ARG_DST, *primitive_dst_mem_}});
 
     // Allocate dst buffer if reorder is necessary
@@ -349,6 +389,11 @@ class MklDnnBatchNorm : public MklDnnKernel {
   std::unique_ptr<mkldnn::memory> mean_mem_;
   std::unique_ptr<mkldnn::memory> var_mem_;
   std::unique_ptr<mkldnn::memory> dst_mem_;
+
+  std::shared_ptr<mkldnn::memory> src_mem_gpu_;
+  std::unique_ptr<mkldnn::memory> scale_shift_mem_gpu_;
+  std::unique_ptr<mkldnn::memory> mean_mem_gpu_;
+  std::unique_ptr<mkldnn::memory> var_mem_gpu_;
 
   std::unique_ptr<mkldnn::memory::desc> src_md_;
   std::unique_ptr<mkldnn::memory::desc> scale_shift_md_;
